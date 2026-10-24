@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Safezone · Editor de artes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<style>/*CSS*/</style>
+</head>
+<body>
+<header class="top">
+  <img id="brandLogo" alt="Safezone">
+  <h1>Editor de artes</h1>
+  <span class="sp"></span>
+  <button class="btn" id="bUndo" title="Desfazer (Ctrl+Z)">↶ Desfazer</button>
+  <button class="btn" id="bRedo" title="Refazer (Ctrl+Y)">↷ Refazer</button>
+  <button class="btn" id="bSave">Salvar layout</button>
+  <button class="btn" id="bLib">Meus layouts</button>
+  <button class="btn" id="bJpg">Exportar JPEG</button>
+  <button class="btn pri" id="bPng">Exportar PNG</button>
+</header>
+
+<main class="app">
+  <aside class="panel left">
+    <details open><summary>1 · Foto do produto</summary><div class="sec">
+      <label id="prodRow" hidden>Produto cadastrado (preenche tudo)<select id="prodSel"></select></label>
+      <input type="file" id="file" accept="image/*" hidden>
+      <button class="btn" id="bPick">Enviar foto (ou arraste para o quadro)</button>
+      <div class="hint" id="photoInfo">Nenhuma foto enviada. A mesma foto recebe qualquer layout abaixo.</div>
+      <label>Zoom <input type="range" id="pzoom" min="1" max="3" step="0.01" value="1"></label>
+      <div class="g2">
+        <label>Posição X <input type="range" id="pox" min="-0.5" max="0.5" step="0.005" value="0"></label>
+        <label>Posição Y <input type="range" id="poy" min="-0.5" max="0.5" step="0.005" value="0"></label>
+      </div>
+    </div></details>
+
+    <details open><summary>2 · Layout e formato</summary><div class="sec">
+      <div class="layouts" id="layouts"></div>
+      <label>Formato
+        <select id="fmt">
+          <option value="square">Post quadrado · 1080×1080</option>
+          <option value="portrait" selected>Post vertical · 1080×1350</option>
+          <option value="story">Story / Reels · 1080×1920</option>
+          <option value="banner">Banner horizontal · 1200×628</option>
+          <option value="custom">Personalizado</option>
+        </select>
+      </label>
+      <div class="g2" id="customBox" hidden>
+        <label>Largura (px)<input type="number" id="cw" min="300" max="4000" value="1080"></label>
+        <label>Altura (px)<input type="number" id="ch" min="300" max="4000" value="1080"></label>
+      </div>
+      <label>Cor de apoio (além do verde neon)</label>
+      <div class="chips" id="chips"></div>
+      <div class="warn" id="customWarn" hidden>Você ajustou elementos manualmente. Editar os textos atualiza os campos, mas não reorganiza o layout.
+        <button class="btn sm" id="bReflow" style="margin-top:6px">Reaplicar layout (descarta ajustes)</button></div>
+    </div></details>
+
+    <details open><summary>3 · Dados do anúncio</summary><div class="sec" id="dataSec">
+      <label>Categoria <input type="text" data-k="category"></label>
+      <label>Nome (linha 1) <input type="text" data-k="title1"></label>
+      <label>Nome (linha 2, destaque) <input type="text" data-k="title2"></label>
+      <label>Descrição curta <textarea data-k="desc"></textarea></label>
+      <label>Texto do topo <input type="text" data-k="infoTop"></label>
+      <div class="hint">Especificações (até 4 linhas; linhas vazias são ignoradas)</div>
+      <div class="g2"><input type="text" data-k="sk0" placeholder="Item 1"><input type="text" data-k="sv0" placeholder="Valor 1"></div>
+      <div class="g2"><input type="text" data-k="sk1" placeholder="Item 2"><input type="text" data-k="sv1" placeholder="Valor 2"></div>
+      <div class="g2"><input type="text" data-k="sk2" placeholder="Item 3"><input type="text" data-k="sv2" placeholder="Valor 3"></div>
+      <div class="g2"><input type="text" data-k="sk3" placeholder="Item 4"><input type="text" data-k="sv3" placeholder="Valor 4"></div>
+    </div></details>
+
+    <details open><summary>4 · Preço, selo e condição</summary><div class="sec">
+      <div class="g2">
+        <label>Preço normal (R$) <input type="text" inputmode="decimal" data-k="priceNormal"></label>
+        <label>Preço promocional (R$) <input type="text" inputmode="decimal" data-k="pricePromo"></label>
+      </div>
+      <div class="hint" id="priceHint"></div>
+      <label>Selo promocional
+        <select data-k="badgeMode">
+          <option value="auto">Automático (pelas regras de preço)</option>
+          <option value="none">Sem selo</option>
+          <option value="OFERTA">OFERTA</option>
+          <option value="SUPER OFERTA">SUPER OFERTA</option>
+          <option value="OPORTUNIDADE">OPORTUNIDADE</option>
+          <option value="DESTAQUE">DESTAQUE</option>
+          <option value="custom">Texto personalizado…</option>
+        </select>
+      </label>
+      <label id="badgeCustomRow" hidden>Texto do selo <input type="text" data-k="badgeCustom" maxlength="24"></label>
+      <div class="g2">
+        <label>Condição
+          <select data-k="condition"><option value="">—</option><option>Novo</option><option>Seminovo</option></select>
+        </label>
+        <label>Nota de conservação (0–10)<input type="number" min="0" max="10" data-k="score"></label>
+      </div>
+      <label>Estado de conservação <input type="text" data-k="conservation" placeholder="Ex.: Excelente, sem marcas de uso"></label>
+      <div class="hint">Mudar o preço aqui altera só a arte. O desconto só aparece quando o promocional é <b>menor</b> que o normal; se forem <b>iguais</b>, aparece só o selo, sem % de desconto.</div>
+    </div></details>
+
+    <details><summary>5 · Chamada e rodapé</summary><div class="sec">
+      <label>Chamada (destaque) <input type="text" data-k="cta1"></label>
+      <label>Chamada (apoio) <input type="text" data-k="cta2"></label>
+      <label>Rodapé · esquerda <input type="text" data-k="footerLeft"></label>
+      <label>Rodapé · direita (@ / contato) <input type="text" data-k="footerRight"></label>
+    </div></details>
+
+    <details id="svcDet"><summary>6 · Serviços (layout 06)</summary><div class="sec">
+      <label>Título <input type="text" data-k="svcTitle"></label>
+      <label>Subtítulo <input type="text" data-k="svcSub"></label>
+      <label>Lista (um serviço por linha) <textarea data-k="svcList" style="min-height:140px"></textarea></label>
+      <label>Preço inicial (opcional, só se você definir) <input type="text" data-k="svcPrice" placeholder="Ex.: 80,00"></label>
+      <label>WhatsApp exibido <input type="text" data-k="svcPhone"></label>
+    </div></details>
+  </aside>
+
+  <section class="stage" id="stage">
+    <div class="stagebox" id="box">
+      <canvas id="cv"></canvas>
+      <canvas id="ov"></canvas>
+    </div>
+  </section>
+
+  <aside class="panel right">
+    <details open><summary>Adicionar elemento</summary><div class="sec">
+      <div class="addrow" id="addrow"></div>
+    </div></details>
+    <details open><summary>Camadas</summary><div class="sec" id="layers"></div></details>
+    <details open><summary>Propriedades</summary><div class="sec" id="insp"><div class="hint">Toque em um elemento da arte (ou na lista de camadas) para editar. Arraste para mover, use o canto para redimensionar e a bolinha para girar.</div></div></details>
+  </aside>
+</main>
+
+<dialog id="dlg">
+  <h3 style="margin:0 0 10px">Meus layouts</h3>
+  <div class="g2" style="grid-template-columns:1fr auto;margin-bottom:10px">
+    <input type="text" id="saveName" placeholder="Nome do layout">
+    <button class="btn pri" id="saveGo">Salvar atual</button>
+  </div>
+  <div id="libList" style="display:grid;gap:6px;max-height:42vh;overflow:auto"></div>
+  <div class="hint" style="margin:10px 0">Os layouts ficam salvos neste navegador. Use exportar/importar para levar para outro aparelho.</div>
+  <div class="addrow">
+    <button class="btn" id="libExp">Exportar JSON</button>
+    <button class="btn" id="libImp">Importar JSON</button>
+    <input type="file" id="libFile" accept="application/json" hidden>
+    <span style="flex:1"></span>
+    <button class="btn" id="dlgClose">Fechar</button>
+  </div>
+</dialog>
+<div class="toast" id="toast"></div>
+<script>window.__LOGO__="data:image/png;base64,/*LOGO*/";</script>
+<script>/*JS*/</script>
+</body>
+</html>
