@@ -48,12 +48,13 @@ const SHEETS = {
     'Especificacoes', 'Condicao', 'Conservacao', 'PrecoNormal', 'PrecoPromocional', 'Estoque', 'Status',
     'FotoPrincipal', 'FotosAdicionais', 'SeloModo', 'SeloManual', 'SeloPromocional', 'SeloCor', 'SeloEstilo',
     'PercentualDesconto', 'Destaque', 'DataPublicacao', 'ObservacoesInternas', 'DataCriacao', 'DataAtualizacao', 'CriadoPor',
-    'LayoutArte', 'FotoArte'],
+    'LayoutArte', 'FotoArte', 'Custo', 'Subcategoria'],
   Vendas: ['IDVenda', 'Data', 'IDAnuncio', 'NomeProduto', 'Quantidade', 'ValorUnitario', 'ValorTotal',
     'Status', 'Origem', 'Observacoes', 'DataAtualizacao'],
   Layouts: ['IDLayout', 'Nome', 'Formato', 'Configuracao', 'DataCriacao', 'DataAtualizacao', 'CriadoPor'],
   Avaliacoes: ['IDAvaliacao', 'IDAnuncio', 'Produto', 'Cliente', 'Estrelas', 'Comentario', 'Observacoes', 'Imagem', 'Autorizado', 'Status', 'Destaque', 'NoProduto', 'NoPortfolio', 'DataCompra', 'DataCriacao', 'DataAtualizacao', 'CriadoPor'],
   Videos: ['IDVideo', 'Titulo', 'Tipo', 'Url', 'ArquivoID', 'Ordem', 'Status', 'DataCriacao'],
+  Ofertas: ['IDOferta', 'Nome', 'Escopo', 'Categoria', 'Subcategoria', 'IDsAnuncios', 'Percentual', 'Inicio', 'Fim', 'Status', 'DataCriacao', 'DataAtualizacao', 'CriadoPor'],
   Servicos: ['IDServico', 'Nome', 'Descricao', 'Modo', 'PrecoUnico', 'PrecoLow', 'PrecoMid', 'PrecoHigh', 'ParteDoPercentual', 'Ordem', 'Ativo'],
   Componentes: ['IDComponente', 'Tipo', 'Marca', 'Nome', 'Classe', 'PrecoEstimado', 'Ativo'],
   Configuracoes: ['Chave', 'Valor'],
@@ -73,6 +74,8 @@ const DEFAULT_SETTINGS = {
   TelefoneServicos: '',
   CanalOfertas: 'https://whatsapp.com/channel/0029Vb8cMtg6LwHpBszDvc13',
   FaixaLimite1: '2000', FaixaPct1: '20', FaixaLimite2: '4000', FaixaPct2: '30', FaixaPct3: '35',
+  Subcategorias: 'Periféricos: Teclados, Mouses, Monitores, Headsets e fones, Mousepads, Webcams e microfones, Controles\nPlacas de vídeo: NVIDIA, AMD\nProcessadores: Intel, AMD\nMemórias RAM: DDR3, DDR4, DDR5\nSSDs e HDs: SSD SATA, SSD NVMe, HD\nCoolers e refrigeração: Air cooler, Water cooler, Ventoinhas',
+  _MargemLucro: '20', _DescontoMaximo: '10', _MargemMinima: '0',
   _versao: '1'
 };
 
@@ -90,6 +93,7 @@ function doPost(e) {
     const req = JSON.parse(raw);
     if (PropertiesService.getScriptProperties().getProperty('REQUIRE_KEY') === '1') checkKey_(req.apiKey);
     action = String(req.action || '');
+    CTX_ = null;
     route = ROUTES[action];
     if (!route) throw new ApiError('NOT_FOUND', 'Ação desconhecida.');
     if (route.auth) {
@@ -150,6 +154,14 @@ const ROUTES = {
   deleteProduct:   { auth: 'produtos', fn: deleteProduct_, write: true },
   uploadImage:     { auth: 'produtos', fn: uploadImage_, write: true },
   deleteImage:     { auth: 'produtos', fn: deleteImage_, write: true },
+  saveProductArt:  { auth: 'produtos', fn: saveProductArt_, write: true },
+  getPricingRules: { auth: 'produtos', fn: pricingRules_ },
+  savePricingRules:{ auth: 'config',   fn: savePricingRules_, write: true },
+  listOffers:      { auth: 'produtos', fn: listOffers_ },
+  previewOffer:    { auth: 'produtos', fn: previewOffer_ },
+  saveOffer:       { auth: 'produtos', fn: saveOffer_, write: true },
+  deleteOffer:     { auth: 'produtos', fn: deleteOffer_, write: true },
+  turnover:        { auth: 'adm',      fn: turnover_ },
   // vendas
   listSales:       { auth: 'vendas',   fn: listSales_ },
   createSale:      { auth: 'vendas',   fn: createSale_, write: true },
@@ -485,6 +497,9 @@ function validateProduct_(d) {
   if (CATEGORIES.indexOf(categoria) < 0) throw new ApiError('VALIDATION', 'Categoria inválida.');
   const svc = categoria === SERVICE_CAT;
 
+  const custo = money_(d.custo);
+  if (isNaN(custo) || (custo != null && custo < 0)) throw new ApiError('VALIDATION', 'Custo inválido.');
+
   const condicao = s(d.condicao, 12);
   if (!svc && condicao !== 'Novo' && condicao !== 'Seminovo') throw new ApiError('VALIDATION', 'Escolha a condição: Novo ou Seminovo.');
 
@@ -529,12 +544,14 @@ function validateProduct_(d) {
     SeloModo: modo, SeloManual: manual, SeloCor: cor, SeloEstilo: estilo,
     Destaque: d.destaque ? 'Sim' : 'Não', DataPublicacao: dataPub,
     ObservacoesInternas: s(d.observacoes, 1000),
+    Custo: custo == null ? '' : custo, Subcategoria: s(d.subcategoria, 60),
     LayoutArte: s(d.layoutArte, 40), FotoArte: validUrl_(s(d.fotoArte, 400)) ? s(d.fotoArte, 400) : ''
   };
 }
 
 function productView_(r, admin) {
-  const p = pricing_(r.PrecoNormal, r.PrecoPromocional, r.SeloModo || 'auto', r.SeloManual);
+  const ef = effectivePromo_(r);
+  const p = pricing_(r.PrecoNormal, ef.promo, r.SeloModo || 'auto', r.SeloManual);
   let extras = [];
   try { extras = JSON.parse(r.FotosAdicionais || '[]'); } catch (e) { extras = []; }
   const svc = r.Categoria === SERVICE_CAT;
@@ -544,7 +561,7 @@ function productView_(r, admin) {
     return i > 0 ? { item: l.slice(0, i).trim(), valor: l.slice(i + 1).trim() } : (l.trim() ? { item: l.trim(), valor: '' } : null);
   }).filter(Boolean);
   const v = {
-    id: r.ID, nome: r.Nome, categoria: r.Categoria, marca: r.Marca, modelo: r.Modelo,
+    id: r.ID, nome: r.Nome, categoria: r.Categoria, subcategoria: r.Subcategoria || '', marca: r.Marca, modelo: r.Modelo,
     descricaoCurta: r.DescricaoCurta, descricaoCompleta: r.DescricaoCompleta,
     especificacoes: specs, especificacoesTexto: r.Especificacoes,
     condicao: r.Condicao, conservacao: r.Conservacao,
@@ -558,6 +575,12 @@ function productView_(r, admin) {
     v.status = r.Status; v.observacoes = r.ObservacoesInternas; v.precoNormal = Number(r.PrecoNormal);
     v.precoPromocional = r.PrecoPromocional === '' ? null : Number(r.PrecoPromocional);
     v.seloModo = r.SeloModo || 'auto'; v.seloManual = r.SeloManual; v.seloCor = r.SeloCor; v.seloEstilo = r.SeloEstilo;
+    const cu = money_(r.Custo), nm = Number(r.PrecoNormal) || 0, rl = ctx_().rules;
+    v.custo = cu > 0 ? cu : null;
+    v.margemAtual = cu > 0 && nm > 0 ? Math.round((nm / cu - 1) * 1000) / 10 : null;
+    v.precoSugerido = cu > 0 ? Math.round(cu * (1 + rl.margem / 100) * 100) / 100 : null;
+    v.precoPromocionalEfetivo = ef.promo == null ? null : ef.promo;
+    v.ofertaAtiva = ef.oferta;
     v.layoutArte = r.LayoutArte || ''; v.fotoArte = r.FotoArte || ''; v.fotosAdicionais = extras; v.criadoPor = r.CriadoPor; v.dataCriacao = cell_(r.DataCriacao);
   }
   return v;
@@ -652,6 +675,248 @@ function deleteProduct_(d, user) {
     audit_(user.login, 'PRODUTO_EXCLUIR', r.ID, 'OK');
     return { ok: true };
   });
+}
+
+/* ===================== MARGEM, OFERTAS E GIRO ===================== */
+
+let CTX_ = null;
+
+/** Regras PRIVADAS (chaves com "_" nunca saem em getSettings). */
+function rules_() {
+  const m = {};
+  table_('Configuracoes').rows.forEach(function (r) { m[r.Chave] = r.Valor; });
+  const n = function (k, def) {
+    const raw = m[k];
+    if (raw === undefined || raw === '' || raw === null) return def;
+    const v = Number(String(raw).replace(',', '.'));
+    return isFinite(v) ? v : def;
+  };
+  return { margem: n('_MargemLucro', 20), descMax: n('_DescontoMaximo', 10), margemMin: n('_MargemMinima', 0) };
+}
+
+function ctx_() {
+  if (!CTX_) CTX_ = { rules: rules_(), offers: table_('Ofertas').rows.filter(offerLive_).map(offerRow_) };
+  return CTX_;
+}
+
+function offerLive_(r) {
+  if (r.Status !== 'Ativa') return false;
+  const n = now_().slice(0, 16), i = String(cell_(r.Inicio)).slice(0, 16), f = String(cell_(r.Fim)).slice(0, 16);
+  return (!i || i <= n) && (!f || f >= n);
+}
+
+function offerRow_(r) {
+  let ids = [];
+  try { ids = JSON.parse(r.IDsAnuncios || '[]'); } catch (e) { ids = []; }
+  return { id: r.IDOferta, nome: r.Nome, escopo: r.Escopo, categoria: r.Categoria, subcategoria: r.Subcategoria || '',
+    ids: ids, pct: Number(r.Percentual) || 0, inicio: String(cell_(r.Inicio)).slice(0, 16), fim: String(cell_(r.Fim)).slice(0, 16), status: r.Status };
+}
+
+function offerCovers_(o, r) {
+  if (r.Categoria === SERVICE_CAT || r.Status === 'Excluído') return false;
+  if (o.escopo === 'todos') return true;
+  if (o.escopo === 'categoria') return r.Categoria === o.categoria && (!o.subcategoria || (r.Subcategoria || '') === o.subcategoria);
+  if (o.escopo === 'produtos') return o.ids.indexOf(r.ID) >= 0;
+  return false;
+}
+
+/** Preço de oferta respeitando: desconto máximo, custo (+ margem mínima). Nunca vende abaixo do piso. */
+function calcOffer_(r, pct, rules) {
+  const normal = Number(r.PrecoNormal) || 0, custo = money_(r.Custo);
+  if (!(custo > 0)) return { ok: false, motivo: 'sem_custo' };
+  if (!(normal > 0)) return { ok: false, motivo: 'sem_preco' };
+  const d = Math.min(pct, rules.descMax);
+  let price = Math.round(normal * (1 - d / 100) * 100) / 100, limite = pct > rules.descMax ? 'desconto máximo' : '';
+  const piso = Math.round(custo * (1 + rules.margemMin / 100) * 100) / 100;
+  if (price < piso) { price = piso; limite = 'custo'; }
+  if (!(price < normal)) return { ok: false, motivo: 'sem_espaco' };
+  return { ok: true, preco: price, pct: Math.round((1 - price / normal) * 1000) / 10, limite: limite,
+    margemApos: Math.round((price / custo - 1) * 1000) / 10 };
+}
+
+/** Promoção que vale hoje = a mais barata entre a manual e as ofertas agendadas. */
+function effectivePromo_(r) {
+  const normal = Number(r.PrecoNormal) || 0;
+  const manual = (r.PrecoPromocional === '' || r.PrecoPromocional == null) ? null : Number(r.PrecoPromocional);
+  let best = null, oferta = null;
+  const c = ctx_();
+  c.offers.forEach(function (o) {
+    if (!offerCovers_(o, r)) return;
+    const x = calcOffer_(r, o.pct, c.rules);
+    if (x.ok && (best == null || x.preco < best)) { best = x.preco; oferta = { id: o.id, nome: o.nome, pct: x.pct, limite: x.limite, fim: o.fim }; }
+  });
+  if (best != null && (manual == null || !(manual > 0 && manual < best))) return { promo: best, oferta: oferta };
+  return { promo: manual, oferta: null };
+}
+
+function pricingRules_() { return rules_(); }
+
+function savePricingRules_(d, user) {
+  return withLock_(function () {
+    const num = function (x, nome, min, max) {
+      const v = Number(String(x == null ? '' : x).replace(',', '.'));
+      if (!isFinite(v) || v < min || v > max) throw new ApiError('VALIDATION', nome + ' deve estar entre ' + min + ' e ' + max + '.');
+      return String(Math.round(v * 100) / 100);
+    };
+    const vals = { _MargemLucro: num(d.margem, 'Margem de lucro', 0, 500), _DescontoMaximo: num(d.descMax, 'Desconto máximo', 0, 90), _MargemMinima: num(d.margemMin, 'Margem mínima', 0, 500) };
+    const t = table_('Configuracoes');
+    Object.keys(vals).forEach(function (k) {
+      const ex = t.rows.find(function (r) { return r.Chave === k; });
+      if (ex) writeRow_(t, ex._row, { Valor: vals[k] }); else appendRow_(t, { Chave: k, Valor: vals[k] });
+    });
+    CacheService.getScriptCache().remove('pub:list');
+    CTX_ = null;
+    audit_(user.login, 'REGRAS_PRECO', '', 'OK');
+    return rules_();
+  });
+}
+
+function validateOffer_(d) {
+  const s = function (x, max) { return String(x == null ? '' : x).trim().slice(0, max); };
+  const nome = s(d.nome, 80);
+  if (nome.length < 2) throw new ApiError('VALIDATION', 'Dê um nome para a oferta (ex.: Semana dos teclados).');
+  const escopo = s(d.escopo, 12);
+  if (['todos', 'categoria', 'produtos'].indexOf(escopo) < 0) throw new ApiError('VALIDATION', 'Escolha onde a oferta se aplica.');
+  let categoria = '', sub = '', ids = [];
+  if (escopo === 'categoria') {
+    categoria = s(d.categoria, 60);
+    if (CATEGORIES.indexOf(categoria) < 0 || categoria === SERVICE_CAT) throw new ApiError('VALIDATION', 'Escolha uma categoria de produtos.');
+    sub = s(d.subcategoria, 60);
+  }
+  if (escopo === 'produtos') {
+    ids = (Array.isArray(d.ids) ? d.ids : []).map(function (x) { return s(x, 20); }).filter(Boolean);
+    if (!ids.length) throw new ApiError('VALIDATION', 'Selecione ao menos um produto.');
+    if (ids.length > 500) throw new ApiError('VALIDATION', 'No máximo 500 produtos por oferta.');
+  }
+  const pct = Number(String(d.percentual == null ? '' : d.percentual).replace(',', '.'));
+  if (!isFinite(pct) || pct < 0.5 || pct > 90) throw new ApiError('VALIDATION', 'O percentual deve estar entre 0,5 e 90.');
+  const re = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}$/;
+  const ini = s(d.inicio, 16).replace('T', ' '), fim = s(d.fim, 16).replace('T', ' ');
+  if (!re.test(ini) || !re.test(fim)) throw new ApiError('VALIDATION', 'Informe início e fim da oferta.');
+  if (fim <= ini) throw new ApiError('VALIDATION', 'O fim da oferta deve ser depois do início.');
+  const status = d.status === 'Pausada' ? 'Pausada' : 'Ativa';
+  return { Nome: nome, Escopo: escopo, Categoria: categoria, Subcategoria: sub, IDsAnuncios: JSON.stringify(ids),
+    Percentual: Math.round(pct * 100) / 100, Inicio: ini, Fim: fim, Status: status };
+}
+
+function previewOffer_(d) {
+  const v = validateOffer_(d), rules = rules_();
+  const o = offerRow_({ IDOferta: '', Nome: v.Nome, Escopo: v.Escopo, Categoria: v.Categoria, Subcategoria: v.Subcategoria, IDsAnuncios: v.IDsAnuncios,
+    Percentual: v.Percentual, Inicio: v.Inicio, Fim: v.Fim, Status: 'Ativa' });
+  const rows = table_('Anuncios').rows.filter(function (r) { return offerCovers_(o, r); }).map(function (r) {
+    const x = calcOffer_(r, o.pct, rules), custo = money_(r.Custo);
+    return { id: r.ID, nome: r.Nome, categoria: r.Categoria, subcategoria: r.Subcategoria || '', status: r.Status, normal: Number(r.PrecoNormal) || 0,
+      custo: custo > 0 ? custo : null, ok: x.ok, motivo: x.ok ? '' : x.motivo, novoPreco: x.ok ? x.preco : null, pct: x.ok ? x.pct : null,
+      limite: x.ok ? x.limite : '', margemApos: x.ok ? x.margemApos : null };
+  });
+  return { regras: rules, pedido: o.pct, total: rows.length, aplicados: rows.filter(function (x) { return x.ok; }).length, itens: rows };
+}
+
+function offerState_(o) {
+  const n = now_().slice(0, 16);
+  if (o.status !== 'Ativa') return o.status === 'Pausada' ? 'Pausada' : 'Excluída';
+  if (o.fim < n) return 'Encerrada';
+  if (o.inicio > n) return 'Agendada';
+  return 'No ar';
+}
+
+function listOffers_() {
+  const prods = table_('Anuncios').rows, rules = rules_();
+  return table_('Ofertas').rows.filter(function (r) { return r.Status !== 'Excluída'; }).map(function (r) {
+    const o = offerRow_(r);
+    const cov = prods.filter(function (p) { return offerCovers_(o, p); });
+    return { id: o.id, nome: o.nome, escopo: o.escopo, categoria: o.categoria, subcategoria: o.subcategoria, ids: o.ids, percentual: o.pct,
+      inicio: o.inicio, fim: o.fim, status: o.status, estado: offerState_(o), produtos: cov.length,
+      aplicados: cov.filter(function (p) { return calcOffer_(p, o.pct, rules).ok; }).length, idsAfetados: cov.map(function (p) { return p.ID; }) };
+  }).sort(function (a, b) { return a.inicio < b.inicio ? 1 : -1; });
+}
+
+function saveOffer_(d, user) {
+  return withLock_(function () {
+    const v = validateOffer_(d), t = table_('Ofertas');
+    let id;
+    if (d.id) {
+      const ex = t.rows.find(function (r) { return r.IDOferta === String(d.id) && r.Status !== 'Excluída'; });
+      if (!ex) throw new ApiError('NOT_FOUND', 'Oferta não encontrada.');
+      v.DataAtualizacao = now_(); writeRow_(t, ex._row, v); id = ex.IDOferta;
+    } else {
+      id = newId_('OF', t.rows.map(function (r) { return r.IDOferta; }));
+      v.IDOferta = id; v.DataCriacao = now_(); v.DataAtualizacao = now_(); v.CriadoPor = user.login; appendRow_(t, v);
+    }
+    CacheService.getScriptCache().remove('pub:list'); CTX_ = null;
+    audit_(user.login, d.id ? 'OFERTA_EDITAR' : 'OFERTA_CRIAR', id, 'OK');
+    return { id: id };
+  });
+}
+
+function deleteOffer_(d, user) {
+  return withLock_(function () {
+    const t = table_('Ofertas');
+    const r = t.rows.find(function (x) { return x.IDOferta === String(d.id || ''); });
+    if (!r) throw new ApiError('NOT_FOUND', 'Oferta não encontrada.');
+    writeRow_(t, r._row, { Status: 'Excluída', DataAtualizacao: now_() });
+    CacheService.getScriptCache().remove('pub:list'); CTX_ = null;
+    audit_(user.login, 'OFERTA_EXCLUIR', r.IDOferta, 'OK');
+    return { ok: true };
+  });
+}
+
+/** Troca só a arte/layout de um anúncio (usado na aplicação em lote). */
+function saveProductArt_(d, user) {
+  return withLock_(function () {
+    const t = table_('Anuncios');
+    const r = t.rows.find(function (x) { return x.ID === String(d.id || ''); });
+    if (!r || r.Status === 'Excluído') throw new ApiError('NOT_FOUND', 'Anúncio não encontrado.');
+    const art = String(d.fotoArte || '').slice(0, 400), lay = String(d.layoutArte || '').slice(0, 40);
+    if (!validUrl_(art)) throw new ApiError('VALIDATION', 'URL da arte inválida.');
+    let extras = [];
+    try { extras = JSON.parse(r.FotosAdicionais || '[]'); } catch (e) { extras = []; }
+    let principal = r.FotoPrincipal;
+    if (r.FotoArte && principal === r.FotoArte) principal = art;
+    else { if (principal) extras.unshift(principal); principal = art; }
+    extras = extras.filter(function (u) { return u && u !== r.FotoArte; }).slice(0, 12);
+    writeRow_(t, r._row, { LayoutArte: lay, FotoArte: art, FotoPrincipal: principal, FotosAdicionais: JSON.stringify(extras), DataAtualizacao: now_() });
+    CacheService.getScriptCache().remove('pub:list');
+    audit_(user.login, 'PRODUTO_ARTE', r.ID, 'OK');
+    return { ok: true, antiga: r.FotoArte || '' };
+  });
+}
+
+/** Giro: vendas concluídas (30/90 dias) x estoque, com folga de margem para ofertas. */
+function turnover_() {
+  const rules = rules_(), day = 86400000;
+  const cut = function (n) { return Utilities.formatDate(new Date(Date.now() - n * day), CFG.TZ, 'yyyy-MM-dd HH:mm:ss'); };
+  const c30 = cut(30), c90 = cut(90), v30 = {}, v90 = {};
+  table_('Vendas').rows.map(saleView_).forEach(function (s) {
+    if (s.status !== 'Venda concluída') return;
+    const dt = String(s.data);
+    if (dt >= c90) v90[s.idAnuncio] = (v90[s.idAnuncio] || 0) + (Number(s.quantidade) || 1);
+    if (dt >= c30) v30[s.idAnuncio] = (v30[s.idAnuncio] || 0) + (Number(s.quantidade) || 1);
+  });
+  const itens = table_('Anuncios').rows.filter(function (r) { return r.Status === 'Publicado' && r.Categoria !== SERVICE_CAT; }).map(function (r) {
+    const q30 = v30[r.ID] || 0, q90 = v90[r.ID] || 0, est = Number(r.Estoque) || 0, custo = money_(r.Custo), normal = Number(r.PrecoNormal) || 0;
+    const dias = q30 > 0 ? Math.round(est / (q30 / 30)) : null;
+    let classe = 'Giro médio';
+    if (q30 >= 3 || (q30 >= 1 && dias != null && dias <= 20)) classe = 'Alto giro';
+    else if (q90 === 0 && est > 0) classe = 'Baixo giro';
+    let folga = null;
+    if (custo > 0 && normal > 0) {
+      const piso = custo * (1 + rules.margemMin / 100);
+      folga = Math.max(0, Math.min(rules.descMax, Math.round((1 - piso / normal) * 1000) / 10));
+    }
+    const sug = classe === 'Alto giro'
+      ? (folga == null ? 'Alto giro, mas falta o custo para calcular o espaço de oferta.' : folga > 0 ? 'Pode vender mais barato: oferta de até ' + folga + '% mantém sua margem.' : 'Alto giro, mas sem espaço de desconto sobre o custo.')
+      : classe === 'Baixo giro' ? 'Pouca saída: mantenha preço/margem maior e evite descontos.' : 'Giro regular: mantenha o preço.';
+    return { id: r.ID, nome: r.Nome, categoria: r.Categoria, subcategoria: r.Subcategoria || '', estoque: est, vendas30: q30, vendas90: q90, diasDeEstoque: dias,
+      classe: classe, margemAtual: custo > 0 && normal > 0 ? Math.round((normal / custo - 1) * 1000) / 10 : null, folgaOferta: folga, semCusto: !(custo > 0), sugestao: sug };
+  });
+  const cats = {};
+  itens.forEach(function (i) {
+    const c = cats[i.categoria] = cats[i.categoria] || { categoria: i.categoria, itens: 0, vendas30: 0, estoque: 0, alto: 0, baixo: 0 };
+    c.itens++; c.vendas30 += i.vendas30; c.estoque += i.estoque; if (i.classe === 'Alto giro') c.alto++; if (i.classe === 'Baixo giro') c.baixo++;
+  });
+  return { regras: rules, itens: itens, categorias: Object.keys(cats).map(function (k) { return cats[k]; }),
+    criterios: 'Alto giro: 3+ vendas em 30 dias (ou 1+ com estoque para até 20 dias). Baixo giro: nenhuma venda em 90 dias com estoque.' };
 }
 
 /* ============================ IMAGENS ============================ */

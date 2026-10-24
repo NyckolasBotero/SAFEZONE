@@ -32,3 +32,14 @@ Site estático (HTML/CSS/JS puro, sem build) + backend em Google Apps Script + G
 2. No Apps Script rode `gerarNovaApiKey()` e `exigirChave()`.
 3. Cloudflare → Settings → Variables and Secrets (Encrypt): `APPS_SCRIPT_URL`, `APPS_SCRIPT_API_KEY`.
 4. Em `assets/js/config.js` troque `proxyUrl: ''` por `proxyUrl: '/api'` e `apiUrl` pode ficar vazio.
+
+## Ofertas, margem e giro (Adm)
+
+- **Custo e Subcategoria** em cada anúncio. O custo é privado (nunca sai no catálogo público).
+- **Configurações → Margem de lucro e ofertas**: margem alvo, desconto máximo e margem mínima sobre o custo. Ficam em chaves privadas (`_MargemLucro`, `_DescontoMaximo`, `_MargemMinima`) que `getSettings` não devolve.
+- **Subcategorias** são editadas em Configurações (uma categoria por linha: `Periféricos: Teclados, Mouses`).
+- **Adm → Agenda de ofertas**: oferta por categoria/subcategoria, produtos escolhidos ou todos, com início e fim. O preço é calculado na leitura (sem editar cada anúncio), respeita o desconto máximo e nunca fica abaixo do custo (+ margem mínima). Produtos sem custo ficam de fora.
+- **Postagem de vendas**: caixas de seleção + “Aplicar layout” em lote; “Atualizar artes” refaz as artes com os preços vigentes.
+- **Indicadores**: giro (vendas 30/90 dias x estoque) e folga de margem para ofertas.
+- **Editor**: formas, sublinhado, sombra, contorno, degradê com ângulo/fade, fontes, espelhar/centralizar e “Criar com IA” (gerador por regras, offline).
+- Depois de colar o novo `Code.gs`, rode `setup()` uma vez e publique uma nova versão da implantação.

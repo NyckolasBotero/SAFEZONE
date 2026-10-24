@@ -3,6 +3,9 @@
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const FONT = 'Poppins,"Segoe UI",system-ui,sans-serif';
+const FONTS = ['Poppins', 'Montserrat', 'Oswald', 'Bebas Neue', 'Anton', 'Playfair Display', 'Orbitron', 'Righteous', 'Bangers', 'Lobster', 'Pacifico', 'Permanent Marker'];
+const famOf = e => (e && e.font && e.font !== 'Poppins') ? `"${e.font}",${FONT}` : FONT;
+const loadFonts = list => Promise.all(Array.from(new Set(list.filter(Boolean))).map(f => document.fonts.load(`700 40px "${f}"`).catch(() => null)));
 const NEON = '#39FF14', NEON2 = '#7CFF5B', MUTE = '#A4ADA5', WHITE = '#F4F7F2', INK = '#051005';
 const FORMATS = { square: [1080, 1080], portrait: [1080, 1350], story: [1080, 1920], banner: [1200, 628] };
 const ACCENTS = [['Roxo', '#A78BFA'], ['Verde', '#7CFF5B'], ['Branco', '#F4F7F2'], ['Azul', '#5AA9FF'], ['Laranja', '#FF9F43']];
@@ -334,7 +337,7 @@ function grad(c, w, h, a, b, ang) {
   const g = c.createLinearGradient(cx - dx * L, cy - dy * L, cx + dx * L, cy + dy * L); g.addColorStop(0, a); g.addColorStop(1, b); return g;
 }
 function setFont(c, e, size) {
-  c.font = `${e.italic ? 'italic ' : ''}${e.weight} ${size}px ${FONT}`;
+  c.font = `${e.italic ? 'italic ' : ''}${e.weight} ${size}px ${famOf(e)}`;
   if ('letterSpacing' in c) c.letterSpacing = (e.ls || 0) + 'px';
 }
 function wrap(c, text, maxW) {
@@ -350,16 +353,39 @@ function wrap(c, text, maxW) {
   });
   return out;
 }
+/** Contorno das formas (retângulo, círculo, triângulo, estrela, explosão, polígono, coração, seta, faixa). */
+function shapePath(c, e) {
+  const w = e.w, h = e.h, k = e.kind || 'rect';
+  if (k === 'rect') { rr(c, 0, 0, w, h, e.r); return; }
+  c.beginPath();
+  const radial = (n, inner, off) => { for (let i = 0; i < n * 2; i++) { const a = off + i * Math.PI / n, r = inner && i % 2 ? inner : 1; const x = w / 2 + Math.cos(a) * r * w / 2, y = h / 2 + Math.sin(a) * r * h / 2; i ? c.lineTo(x, y) : c.moveTo(x, y); } c.closePath(); };
+  const poly = pts => { pts.forEach(([x, y], i) => i ? c.lineTo(x * w, y * h) : c.moveTo(x * w, y * h)); c.closePath(); };
+  if (k === 'ellipse') c.ellipse(w / 2, h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
+  else if (k === 'triangle') poly([[.5, 0], [1, 1], [0, 1]]);
+  else if (k === 'star') radial(Math.max(3, e.n || 5), e.inner || .45, -Math.PI / 2);
+  else if (k === 'burst') radial(Math.max(6, e.n || 16), e.inner || .82, -Math.PI / 2);
+  else if (k === 'poly') { const n = Math.max(3, e.n || 6); for (let i = 0; i < n; i++) { const a = -Math.PI / 2 + i * 2 * Math.PI / n, x = w / 2 + Math.cos(a) * w / 2, y = h / 2 + Math.sin(a) * h / 2; i ? c.lineTo(x, y) : c.moveTo(x, y); } c.closePath(); }
+  else if (k === 'heart') { c.moveTo(w / 2, h * .95); c.bezierCurveTo(-w * .15, h * .6, w * .05, -h * .05, w / 2, h * .3); c.bezierCurveTo(w * .95, -h * .05, w * 1.15, h * .6, w / 2, h * .95); c.closePath(); }
+  else if (k === 'arrow') poly([[0, .3], [.6, .3], [.6, 0], [1, .5], [.6, 1], [.6, .7], [0, .7]]);
+  else if (k === 'ribbon') { const n = Math.min(.5, h * .5 / w); poly([[0, 0], [1, 0], [1 - n, .5], [1, 1], [0, 1], [n, .5]]); }
+  else rr(c, 0, 0, w, h, e.r);
+}
 function textOf(e, V) { return e.bind ? (V[e.bind] ?? '') : e.text; }
 function visible(e, V) { return !e.hide && (!e.showIf || V[e.showIf]); }
 
 const DRAW = {
   rect(c, e) {
+    const sw = e.sw || 0;
     if (e.glow) { c.shadowColor = e.glow; c.shadowBlur = e.gb; }
-    c.fillStyle = e.fill2 ? grad(c, e.w, e.h, e.fill, e.fill2, e.ang) : e.fill;
-    rr(c, 0, 0, e.w, e.h, e.r); c.fill();
+    const f2 = e.fade ? hexA(e.fill, 0) : e.fill2;
+    c.fillStyle = f2 ? grad(c, e.w, e.h, e.fill, f2, e.ang) : e.fill;
+    shapePath(c, e); c.fill();
     c.shadowBlur = 0; c.shadowColor = 'transparent';
-    if (e.stroke && e.sw > 0) { c.strokeStyle = e.stroke; c.lineWidth = e.sw; rr(c, 0, 0, e.w, e.h, e.r); c.stroke(); }
+    if (e.stroke && sw > 0) {
+      c.strokeStyle = e.stroke2 ? grad(c, e.w, e.h, e.stroke, e.stroke2, e.ang) : e.stroke; c.lineWidth = sw; c.lineJoin = 'round';
+      if (e.dash === 'dashed') c.setLineDash([sw * 3.5, sw * 2.2]); else if (e.dash === 'dotted') { c.setLineDash([0.1, sw * 2]); c.lineCap = 'round'; }
+      shapePath(c, e); c.stroke(); c.setLineDash([]); c.lineCap = 'butt';
+    }
   },
   glow(c, e) {
     c.translate(e.w / 2, e.h / 2); c.scale(1, e.h / e.w);
@@ -459,20 +485,24 @@ const DRAW = {
     const th = lines.length * lh, y0 = e.valign === 'middle' ? (e.h - th) / 2 : e.valign === 'bottom' ? e.h - th : 0;
     c.textBaseline = 'middle'; c.textAlign = e.align;
     const gx = e.align === 'center' ? e.w / 2 : e.align === 'right' ? e.w : 0;
-    if (e.color2) c.fillStyle = grad(c, e.w, th, e.color, e.color2, 0); else c.fillStyle = e.color;
+    const tg = () => (e.color2 || e.fade) ? grad(c, e.w, th, e.color, e.fade ? hexA(e.color, 0) : e.color2, e.gang || 0) : e.color;
+    c.fillStyle = tg();
     lines.forEach((ln, i) => {
       const y = y0 + i * lh + lh / 2;
+      if (e.sh) { c.shadowColor = e.sh; c.shadowBlur = e.shb || 0; c.shadowOffsetX = e.sx || 0; c.shadowOffsetY = e.sy || 0; }
       if (e.outline && e.ow > 0) { c.strokeStyle = e.outline; c.lineWidth = e.ow; c.lineJoin = 'round'; c.strokeText(ln, gx, y); }
       if (!e.nofill) c.fillText(ln, gx, y);
+      c.shadowColor = 'transparent'; c.shadowBlur = 0; c.shadowOffsetX = 0; c.shadowOffsetY = 0;
       const w = c.measureText(ln).width, x1 = e.align === 'center' ? gx - w / 2 : e.align === 'right' ? gx - w : gx;
-      if (e.strike) { c.fillStyle = e.color2 ? c.fillStyle : e.color; c.fillRect(x1, y, w, Math.max(2, size * .06)); }
-      if (e.dot && i === 0) { c.save(); c.fillStyle = e.dot; c.shadowColor = e.dot; c.shadowBlur = size * .5; c.beginPath(); c.arc(x1 - size * .55, y, size * .14, 0, 7); c.fill(); c.restore(); if (e.color2) c.fillStyle = grad(c, e.w, th, e.color, e.color2, 0); }
+      if (e.strike) c.fillRect(x1, y, w, Math.max(2, size * .06));
+      if (e.underline) c.fillRect(x1, y + size * .42, w, Math.max(2, size * .06));
+      if (e.dot && i === 0) { c.save(); c.fillStyle = e.dot; c.shadowColor = e.dot; c.shadowBlur = size * .5; c.beginPath(); c.arc(x1 - size * .55, y, size * .14, 0, 7); c.fill(); c.restore(); c.fillStyle = tg(); }
     });
   }
 };
 
 function drawEl(c, e, ex, V) {
-  c.save(); c.globalAlpha = e.op; c.translate(e.x + e.w / 2, e.y + e.h / 2); c.rotate(e.rot * Math.PI / 180); c.translate(-e.w / 2, -e.h / 2);
+  c.save(); c.globalAlpha = e.op; c.translate(e.x + e.w / 2, e.y + e.h / 2); c.rotate(e.rot * Math.PI / 180); if (e.fx || e.fy) c.scale(e.fx ? -1 : 1, e.fy ? -1 : 1); c.translate(-e.w / 2, -e.h / 2);
   try { DRAW[e.type](c, e, ex, V); } finally { c.restore(); }
 }
 function drawScene(c, ex) {
@@ -644,6 +674,7 @@ function addEl(kind) {
   const c = { x: W / 2, y: H / 2 };
   if (kind === 'text') e = txt({ name: 'Texto', text: 'Novo texto', w: 520 * k, h: 90 * k, size: 64 * k, weight: 600, fit: false });
   else if (kind === 'rect') e = rect({ name: 'Forma', w: 360 * k, h: 200 * k, fill: NEON, r: 24 * k });
+  else if (SHAPES[kind]) { const [nm, kd, ww, hh, n] = SHAPES[kind]; e = rect({ name: nm, kind: kd, w: ww * k, h: hh * k, fill: kind === 'burst' ? NEON : S.accent, n: n || undefined, r: 0 }); }
   else if (kind === 'line') e = lineEl({ name: 'Linha', w: 520 * k, h: 4 * k, c1: NEON, c2: S.accent });
   else if (kind === 'glow') e = glowEl({ name: 'Brilho', w: 700 * k, h: 700 * k, c: NEON, op: .5 });
   else if (kind === 'badge') e = badgeEl({ name: 'Selo', bind: null, text: 'OFERTA', w: 280 * k, h: 70 * k, size: 36 * k });
@@ -657,7 +688,8 @@ function addEl(kind) {
 }
 
 /* ----------------------------- painéis ----------------------------- */
-const ADD = [['text', 'Texto'], ['rect', 'Forma'], ['line', 'Linha'], ['glow', 'Brilho'], ['badge', 'Selo'], ['tag', 'Etiqueta'], ['logo', 'Logo'], ['image', 'Imagem'], ['bolt', '⚡'], ['star', '★'], ['check', '✓'], ['shield', 'Escudo']];
+const SHAPES = { ellipse: ['Círculo', 'ellipse', 320, 320], triangle: ['Triângulo', 'triangle', 320, 280], star5: ['Estrela', 'star', 320, 320, 5], burst: ['Explosão', 'burst', 340, 340, 16], poly: ['Polígono', 'poly', 320, 320, 6], heart: ['Coração', 'heart', 320, 290], arrow: ['Seta', 'arrow', 420, 220], ribbon: ['Faixa', 'ribbon', 560, 110] };
+const ADD = [['text', 'Texto'], ['rect', 'Forma'], ['line', 'Linha'], ['ellipse', 'Círculo'], ['triangle', 'Triângulo'], ['star5', 'Estrela'], ['burst', 'Explosão'], ['poly', 'Polígono'], ['heart', 'Coração'], ['arrow', 'Seta'], ['ribbon', 'Faixa'], ['glow', 'Brilho'], ['badge', 'Selo'], ['tag', 'Etiqueta'], ['logo', 'Logo'], ['image', 'Imagem'], ['bolt', '⚡'], ['star', '★'], ['check', '✓'], ['shield', 'Escudo']];
 $('#addrow').innerHTML = ADD.map(([k, n]) => `<button class="btn sm" data-add="${k}">${n}</button>`).join('') + '<input type="file" id="imgFile" accept="image/*" hidden>';
 $('#addrow').addEventListener('click', ev => { const b = ev.target.closest('[data-add]'); if (b) addEl(b.dataset.add); });
 $('#imgFile').addEventListener('change', ev => {
@@ -668,15 +700,21 @@ $('#imgFile').addEventListener('change', ev => {
 });
 
 function renderLayers() {
-  const V = vals();
-  $('#layers').innerHTML = S.els.slice().reverse().map(e => `
+  const V = vals(), deco = S.els.filter(e => e.deco);
+  const rows = S.els.slice().reverse().filter(e => !e.deco).map(e => `
     <div class="layer ${e.id === S.sel ? 'on' : ''} ${e.hide || (e.showIf && !V[e.showIf]) ? 'off' : ''}" data-id="${e.id}">
       <span class="nm">${e.lock ? '🔒 ' : ''}${esc(e.name)}</span>
       <span class="ops"><button data-op="hide" title="Mostrar/ocultar">${e.hide ? '🚫' : '👁'}</button><button data-op="lock" title="Bloquear">${e.lock ? '🔓' : '🔒'}</button></span>
-    </div>`).join('') || '<div class="hint">Sem elementos.</div>';
+    </div>`);
+  if (deco.length) { const off = deco.every(e => e.hide); rows.push(`<div class="layer ${off ? 'off' : ''}" data-deco="1"><span class="nm">✨ Decoração (${deco.length} itens)</span><span class="ops"><button data-op="hide" title="Mostrar/ocultar toda a decoração">${off ? '🚫' : '👁'}</button><button data-op="del" title="Apagar a decoração">🗑</button></span></div>`); }
+  $('#layers').innerHTML = rows.join('') || '<div class="hint">Sem elementos.</div>';
 }
 $('#layers').addEventListener('click', ev => {
-  const row = ev.target.closest('.layer'); if (!row) return; const id = +row.dataset.id, e = S.els.find(x => x.id === id), op = ev.target.closest('[data-op]');
+  const row = ev.target.closest('.layer'); if (!row) return;
+  if (row.dataset.deco) { const op = ev.target.closest('[data-op]'); if (!op) return; const L = S.els.filter(e => e.deco);
+    if (op.dataset.op === 'del') { if (!confirm('Apagar toda a decoração (neve, confetes, estrelas…)?')) return; S.els = S.els.filter(e => !e.deco); } else { const off = L.every(e => e.hide); L.forEach(e => { e.hide = !off; }); }
+    commit(); refreshPanels(); return; }
+  const id = +row.dataset.id, e = S.els.find(x => x.id === id), op = ev.target.closest('[data-op]');
   if (op && e) { if (op.dataset.op === 'hide') e.hide = !e.hide; else e.lock = !e.lock; markDirty(e); commit(); refreshPanels(); return; }
   select(id);
 });
@@ -689,15 +727,23 @@ function renderInsp() {
   if (!e) { el.innerHTML = '<div class="hint">Toque em um elemento da arte (ou na lista de camadas) para editar. Arraste para mover, use o quadrado do canto para redimensionar e a bolinha para girar. Setas movem 1px (Shift = 10px).</div>'; return; }
   let h = `<div class="hint"><b>${esc(e.name)}</b>${e.bind ? ` · ligado ao campo "${e.bind}"` : ''}${e.showIf ? ' · aparece só se o campo tiver valor' : ''}</div>
     <div class="addrow"><button class="btn sm" data-a="dup">Duplicar</button><button class="btn sm" data-a="lock">${e.lock ? 'Desbloquear' : 'Bloquear'}</button><button class="btn sm" data-a="hide">${e.hide ? 'Mostrar' : 'Ocultar'}</button><button class="btn sm" data-a="del">Excluir</button><button class="btn sm" data-a="up">▲ Frente</button><button class="btn sm" data-a="down">▼ Trás</button></div>
+    <div class="addrow"><button class="btn sm" data-a="fx">↔ Espelhar</button><button class="btn sm" data-a="fy">↕ Espelhar</button><button class="btn sm" data-a="ch">Centralizar ↔</button><button class="btn sm" data-a="cv">Centralizar ↕</button><button class="btn sm" data-a="r0">Zerar giro</button></div>
     <div class="g2">${num('x', 'X')}${num('y', 'Y')}${num('w', 'Largura')}${num('h', 'Altura')}${num('rot', 'Rotação °')}<label>Opacidade<input type="range" data-p="op" min="0" max="1" step="0.01"></label></div>`;
   if (e.type === 'text') h += `<label>Conteúdo<textarea data-p="text"></textarea></label>${e.bind ? '<div class="hint">Editar aqui desliga o vínculo com o campo do anúncio.</div>' : ''}
     <div class="g2">${num('size', 'Tamanho', 1, 4)}<label>Peso<select data-p="weight"><option>300</option><option>400</option><option>500</option><option>600</option><option>700</option><option>800</option></select></label>
     ${col('color', 'Cor')}${col('color2', 'Cor 2 (degradê)')}<label>Alinhar<select data-p="align"><option value="left">Esquerda</option><option value="center">Centro</option><option value="right">Direita</option></select></label>
     <label>Vertical<select data-p="valign"><option value="top">Topo</option><option value="middle">Meio</option><option value="bottom">Base</option></select></label>${num('ls', 'Espaçamento', 0.5)}${num('lh', 'Entrelinha', 0.05, 0.6, 3)}</div>
-    <label class="row">Ajustar ao quadro (sem cortar)<input type="checkbox" data-p="fit"></label><label class="row">Tudo em maiúsculas<input type="checkbox" data-p="upper"></label><label class="row">Itálico<input type="checkbox" data-p="italic"></label><label class="row">Riscado<input type="checkbox" data-p="strike"></label>
-    <button class="btn sm" data-a="nograd">Remover degradê</button>`;
+    <label class="row">Ajustar ao quadro (sem cortar)<input type="checkbox" data-p="fit"></label><label class="row">Tudo em maiúsculas<input type="checkbox" data-p="upper"></label><label class="row">Itálico<input type="checkbox" data-p="italic"></label><label class="row">Riscado<input type="checkbox" data-p="strike"></label><label class="row">Sublinhado<input type="checkbox" data-p="underline"></label>
+    <label>Fonte<select data-p="font">${FONTS.map(f => `<option value="${f}" style="font-family:'${f}'">${f}</option>`).join('')}</select></label>
+    <div class="hint">Degradê (efeito de cor que se funde)</div><div class="g2">${num('gang', 'Ângulo do degradê °', 5)}<label class="row">Esmaecer até transparente<input type="checkbox" data-p="fade"></label></div>
+    <div class="hint">Contorno e sombra</div><div class="g2">${col('outline', 'Cor do contorno')}${num('ow', 'Espessura', 0.5, 0)}${col('sh', 'Cor da sombra')}${num('shb', 'Desfoque', 1, 0)}${num('sx', 'Sombra X', 1)}${num('sy', 'Sombra Y', 1)}</div>
+    <button class="btn sm" data-a="nograd">Remover degradê</button> <button class="btn sm" data-a="noout">Sem contorno</button> <button class="btn sm" data-a="nosh">Sem sombra</button>`;
   if (e.type === 'price') h += `<div class="g2">${num('size', 'Tamanho', 1, 8)}${col('color', 'Cor do valor')}${col('color2', 'Cor 2')}${col('cur', 'Cor do R$')}</div><div class="hint">O valor vem do campo "Preço" (seção 4).</div>`;
-  if (e.type === 'rect') h += `<div class="g2">${col('fill', 'Cor')}${col('fill2', 'Cor 2 (degradê)')}${num('ang', 'Ângulo °')}${num('r', 'Cantos', 1, 0)}${col('stroke', 'Contorno')}${num('sw', 'Espessura', 0.5, 0)}${col('glow', 'Brilho')}${num('gb', 'Intensidade', 1, 0)}</div><button class="btn sm" data-a="nograd">Remover degradê</button> <button class="btn sm" data-a="noglow">Sem brilho</button>`;
+  if (e.type === 'rect') h += `<label>Forma<select data-p="kind">${[['rect', 'Retângulo'], ['ellipse', 'Círculo'], ['triangle', 'Triângulo'], ['star', 'Estrela'], ['burst', 'Explosão'], ['poly', 'Polígono'], ['heart', 'Coração'], ['arrow', 'Seta'], ['ribbon', 'Faixa']].map(([k, n]) => `<option value="${k}">${n}</option>`).join('')}</select></label>
+    ${['star', 'burst', 'poly'].includes(e.kind) ? `<div class="g2">${num('n', e.kind === 'poly' ? 'Lados' : 'Pontas', 1, 3, 40)}</div>` : ''}
+    <label>Contorno<select data-p="dash"><option value="">Contínuo</option><option value="dashed">Tracejado</option><option value="dotted">Pontilhado</option></select></label>
+    <label class="row">Esmaecer até transparente<input type="checkbox" data-p="fade"></label><div class="g2">${col('stroke2', 'Contorno cor 2')}</div>
+    <div class="g2">${col('fill', 'Cor')}${col('fill2', 'Cor 2 (degradê)')}${num('ang', 'Ângulo °')}${num('r', 'Cantos', 1, 0)}${col('stroke', 'Contorno')}${num('sw', 'Espessura', 0.5, 0)}${col('glow', 'Brilho')}${num('gb', 'Intensidade', 1, 0)}</div><button class="btn sm" data-a="nograd">Remover degradê</button> <button class="btn sm" data-a="noglow">Sem brilho</button>`;
   if (e.type === 'line') h += `<div class="g2">${col('c1', 'Cor 1')}${col('c2', 'Cor 2')}</div><label class="row">Esmaecer no fim<input type="checkbox" data-p="fade"></label>`;
   if (e.type === 'glow') h += `<div class="g2">${col('c', 'Cor')}</div>`;
   if (e.type === 'grid') h += `<div class="g2">${col('c', 'Cor')}${num('gap', 'Espaço', 2, 10)}</div>`;
@@ -713,7 +759,7 @@ function renderInspValues() {
     if (document.activeElement === i) return;
     const k = i.dataset.p; let v = e[k];
     if (i.type === 'checkbox') i.checked = !!v;
-    else if (i.type === 'color') i.value = /^#[0-9a-f]{6}$/i.test(v || '') ? v : (k === 'color2' || k === 'fill2' || k === 'stroke' || k === 'glow' || k === 'bc' ? '#000000' : '#ffffff');
+    else if (i.type === 'color') i.value = /^#[0-9a-f]{6}$/i.test(v || '') ? v : (['color2', 'fill2', 'stroke', 'stroke2', 'glow', 'bc', 'outline', 'sh'].includes(k) ? '#000000' : '#ffffff');
     else if (k === 'text' && e.bind) i.value = textOf(e, vals());
     else i.value = typeof v === 'number' ? Math.round(v * 100) / 100 : (v ?? '');
   });
@@ -723,6 +769,8 @@ $('#insp').addEventListener('input', ev => {
   const k = i.dataset.p; let v = i.type === 'checkbox' ? i.checked : i.type === 'number' || i.type === 'range' ? parseFloat(i.value) : i.value;
   if (typeof v === 'number' && isNaN(v)) return;
   if (k === 'weight') v = parseInt(v, 10);
+  if (k === 'font') loadFonts([v]).then(render);
+  if (k === 'kind') { e.kind = v; commit(); renderInsp(); }
   if (k === 'text' && e.bind) { e.bind = null; }
   e[k] = v; markDirty(e); render(); renderLayers();
 });
@@ -731,7 +779,11 @@ $('#insp').addEventListener('click', ev => {
   const b = ev.target.closest('[data-a]'), e = cur(); if (!b || !e) return; const a = b.dataset.a;
   if (a === 'dup') dup(); else if (a === 'del') del(); else if (a === 'up') move(1); else if (a === 'down') move(-1);
   else if (a === 'lock') { e.lock = !e.lock; refreshPanels(); commit(); } else if (a === 'hide') { e.hide = !e.hide; refreshPanels(); commit(); }
-  else if (a === 'nograd') { e.color2 = null; e.fill2 = null; render(); renderInsp(); commit(); } else if (a === 'noglow') { e.glow = null; e.gb = 0; render(); renderInsp(); commit(); }
+  else if (a === 'fx') { e.fx = !e.fx; markDirty(e); render(); commit(); } else if (a === 'fy') { e.fy = !e.fy; markDirty(e); render(); commit(); }
+  else if (a === 'ch') { e.x = (S.W - e.w) / 2; markDirty(e); render(); renderInspValues(); commit(); } else if (a === 'cv') { e.y = (S.H - e.h) / 2; markDirty(e); render(); renderInspValues(); commit(); }
+  else if (a === 'r0') { e.rot = 0; markDirty(e); render(); renderInspValues(); commit(); }
+  else if (a === 'noout') { e.outline = null; e.ow = 0; render(); renderInsp(); commit(); } else if (a === 'nosh') { e.sh = null; e.shb = 0; render(); renderInsp(); commit(); }
+  else if (a === 'nograd') { e.fade = false; e.stroke2 = null; e.color2 = null; e.fill2 = null; render(); renderInsp(); commit(); } else if (a === 'noglow') { e.glow = null; e.gb = 0; render(); renderInsp(); commit(); }
 });
 function refreshPanels() { renderLayers(); renderInsp(); render(); $('#customWarn').hidden = !S.dirty; }
 
@@ -812,7 +864,7 @@ function syncAll() {
 /* ------------------------------ exportar ------------------------------ */
 function fileName(ext) { return `safezone-${S.layout}-${S.W}x${S.H}.${ext}`; }
 async function exportImg(type) {
-  try { await document.fonts.ready; } catch (e) { /* segue */ }
+  try { await loadFonts(S.els.map(e => e.font)); await document.fonts.ready; } catch (e) { /* segue */ }
   const c = document.createElement('canvas'); c.width = S.W; c.height = S.H; const x = c.getContext('2d');
   if (type === 'image/jpeg') { x.fillStyle = '#080A08'; x.fillRect(0, 0, S.W, S.H); }
   drawScene(x, true);
@@ -891,7 +943,7 @@ async function renderArt(cfg, p, photoUrl, type) {
   fillProduct(p);
   if (photoUrl) setPhoto(await loadImg(photoUrl), p.nome);
   if (!LOGO.complete) await new Promise(r => LOGO.addEventListener('load', r, { once: true }));
-  try { await Promise.all([300, 400, 500, 600, 700, 800].map(w => document.fonts.load(`${w} 40px Poppins`))); await document.fonts.ready; } catch (e) { /* segue */ }
+  try { await Promise.all([300, 400, 500, 600, 700, 800].map(w => document.fonts.load(`${w} 40px Poppins`)).concat(loadFonts(S.els.map(e => e.font)))); await document.fonts.ready; } catch (e) { /* segue */ }
   const c = document.createElement('canvas'); c.width = S.W; c.height = S.H; const x = c.getContext('2d');
   x.fillStyle = '#080A08'; x.fillRect(0, 0, S.W, S.H); drawScene(x, true);
   S.sel = null; syncAll(); render();
@@ -916,6 +968,107 @@ const API = {
 window.SafezoneEditor = API;
 window.addEventListener('message', ev => { if (ev.origin !== location.origin) return; if (ev.data && ev.data.type === 'sz:cloud') API.setCloud(ev.data.layouts); if (ev.data && ev.data.type === 'sz:products') API.setProducts(ev.data.products || []); if (ev.data && ev.data.type === 'sz:product') API.applyProduct(ev.data.product);
   if (ev.data && ev.data.type === 'sz:render') API.renderArt(ev.data.config, ev.data.product, ev.data.photo).then(u => toParent({ type: 'sz:rendered', reqId: ev.data.reqId, dataUrl: u }), er => toParent({ type: 'sz:rendered', reqId: ev.data.reqId, error: (er && er.message) || 'Falha ao gerar a arte.' })); });
+
+/* ------------------- gerador de layouts por descrição ("mini IA") ------------------- */
+// Não usa servidor nem IA online: lê a descrição (ocasião, cores, %, texto entre aspas) e monta um layout
+// completo e editável a partir dos layouts padrão, com cores, decoração e selo de campanha.
+const AI_THEMES = [
+  { id: 'natal', name: 'Natal', keys: ['natal', 'natalino', 'natalina', 'papai noel', 'christmas'], v: [{ bg: ['#2A0508', '#0B1A10'], a: '#FF3B4E', b: '#2ECC71' }, { bg: ['#0B1A10', '#220509'], a: '#2ECC71', b: '#FF3B4E' }], deco: ['snow', 'stars'], tag: 'NATAL', cta: 'Presente de Natal na Safezone' },
+  { id: 'bf', name: 'Black Friday', keys: ['black friday', 'blackfriday', 'cyber monday'], v: [{ bg: ['#050505', '#14110A'], a: '#FFD60A', b: '#FF9F0A' }], deco: ['rays', 'grid'], tag: 'BLACK FRIDAY', cta: 'Black Friday Safezone' },
+  { id: 'anonovo', name: 'Ano Novo', keys: ['ano novo', 'reveillon', 'virada'], v: [{ bg: ['#05050F', '#1A1330'], a: '#F5C451', b: '#A78BFA' }], deco: ['confetti', 'stars'], tag: 'ANO NOVO', cta: 'Comece o ano com upgrade' },
+  { id: 'maes', name: 'Dia das Mães', keys: ['dia das maes', 'maes', 'mae', 'mamae'], v: [{ bg: ['#240A18', '#0B0A10'], a: '#FF5FA2', b: '#FFB3D1' }], deco: ['hearts', 'bokeh'], tag: 'DIA DAS MÃES', cta: 'Presente especial para ela' },
+  { id: 'pais', name: 'Dia dos Pais', keys: ['dia dos pais', 'pais', 'pai'], v: [{ bg: ['#06101F', '#0A0E14'], a: '#4DA3FF', b: '#9AD0FF' }], deco: ['rays', 'grid'], tag: 'DIA DOS PAIS', cta: 'O presente que ele vai usar' },
+  { id: 'namorados', name: 'Dia dos Namorados', keys: ['namorados', 'amor', 'valentine'], v: [{ bg: ['#2A0A14', '#0E0A12'], a: '#FF3B6B', b: '#FF9AB8' }], deco: ['hearts', 'bokeh'], tag: 'NAMORADOS', cta: 'Presente para quem você ama' },
+  { id: 'pascoa', name: 'Páscoa', keys: ['pascoa', 'coelho', 'coelhinho'], v: [{ bg: ['#1A1030', '#0B0A14'], a: '#C084FC', b: '#FFD60A' }], deco: ['confetti', 'bokeh'], tag: 'PÁSCOA', cta: 'Páscoa Safezone' },
+  { id: 'criancas', name: 'Dia das Crianças', keys: ['dia das criancas', 'criancas', 'crianca', 'kids'], v: [{ bg: ['#0B1230', '#120A24'], a: '#FFD60A', b: '#FF5FA2' }], deco: ['confetti', 'stars'], tag: 'DIA DAS CRIANÇAS', cta: 'Diversão em dobro' },
+  { id: 'halloween', name: 'Halloween', keys: ['halloween', 'bruxa', 'terror'], v: [{ bg: ['#120804', '#0A0612'], a: '#FF9F0A', b: '#A855F7' }], deco: ['bokeh', 'stars'], tag: 'HALLOWEEN', cta: 'Ofertas de arrepiar' },
+  { id: 'carnaval', name: 'Carnaval', keys: ['carnaval', 'folia'], v: [{ bg: ['#10061E', '#06160F'], a: '#FF5FA2', b: '#2EE6A6' }], deco: ['confetti'], tag: 'CARNAVAL', cta: 'Carnaval Safezone' },
+  { id: 'aulas', name: 'Volta às aulas', keys: ['volta as aulas', 'escola', 'estudante', 'aulas'], v: [{ bg: ['#06101F', '#0A1A14'], a: '#4DA3FF', b: '#7CFF5B' }], deco: ['grid', 'stars'], tag: 'VOLTA ÀS AULAS', cta: 'Estude e jogue com mais desempenho' },
+  { id: 'verao', name: 'Verão', keys: ['verao', 'praia', 'ferias'], v: [{ bg: ['#0A1A24', '#241006'], a: '#FF9F0A', b: '#22D3EE' }], deco: ['rays', 'bokeh'], tag: 'VERÃO', cta: 'Verão Safezone' },
+  { id: 'junina', name: 'Festa Junina', keys: ['junina', 'sao joao', 'arraial'], v: [{ bg: ['#1F0F04', '#0B1006'], a: '#FFB020', b: '#EF4444' }], deco: ['confetti'], tag: 'FESTA JUNINA', cta: 'Arraiá Safezone' },
+  { id: 'aniv', name: 'Aniversário', keys: ['aniversario', 'parabens'], v: [{ bg: ['#0B0A18', '#14081F'], a: '#A78BFA', b: '#39FF14' }], deco: ['confetti', 'stars'], tag: 'ANIVERSÁRIO', cta: 'Aniversário Safezone' },
+  { id: 'liq', name: 'Liquidação', keys: ['liquidacao', 'queima', 'saldao', 'ultimas unidades'], v: [{ bg: ['#1A0505', '#0A0A0A'], a: '#FF3B30', b: '#FFD60A' }], deco: ['rays'], tag: 'LIQUIDAÇÃO', cta: 'Últimas unidades' },
+  { id: 'gamer', name: 'Gamer neon', keys: ['gamer', 'neon', 'cyberpunk', 'setup'], v: [{ bg: ['#05000F', '#0A0020'], a: '#FF2BD6', b: '#22D3EE' }], deco: ['grid', 'bokeh'], tag: 'GAMER', cta: 'Monte seu setup', base: 'gamer' },
+  { id: 'premium', name: 'Premium', keys: ['luxo', 'premium', 'elegante', 'sofisticado'], v: [{ bg: ['#0B0A06', '#16120A'], a: '#F5C451', b: '#FFE9A8' }], deco: ['stars'], tag: 'PREMIUM', cta: 'Seleção premium', base: 'premium' }
+];
+const AI_DEFAULT = { id: 'promo', name: 'Promoção', v: [{ bg: ['#07080B', '#0F0B1E'], a: '#39FF14', b: '#A78BFA' }], deco: ['bokeh'], tag: 'OFERTA', cta: 'Aproveite na Safezone' };
+const AI_COLORS = { 'verde neon': '#39FF14', vermelho: '#FF3B4E', azul: '#4DA3FF', verde: '#2ECC71', roxo: '#A78BFA', rosa: '#FF5FA2', laranja: '#FF9F0A', amarelo: '#FFD60A', dourado: '#F5C451', ciano: '#22D3EE', prata: '#CBD5E1', branco: '#F4F7F2' };
+const aiNorm = t => String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9% ]+/g, ' ').replace(/\s+/g, ' ').trim();
+const hexRGB = h => { const n = parseInt(h.slice(1), 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; };
+const mixHex = (a, b, t) => { const A = hexRGB(a), B = hexRGB(b); return '#' + A.map((x, i) => Math.round(x + (B[i] - x) * t).toString(16).padStart(2, '0')).join(''); };
+const lumOf = h => { const [r, g, b] = hexRGB(h); return (.299 * r + .587 * g + .114 * b) / 255; };
+function prng(seed) { let a = seed >>> 0; return () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ t >>> 15, t | 1); t ^= t + Math.imul(t ^ t >>> 7, t | 61); return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function aiTheme(prompt, seed) {
+  const raw = String(prompt || ''), n = ' ' + aiNorm(raw) + ' ', R = prng(seed);
+  const hit = AI_THEMES.find(t => t.keys.some(k => n.includes(' ' + k + ' '))) || AI_DEFAULT;
+  const v = hit.v[Math.floor(R() * hit.v.length)];
+  const th = { id: hit.id, name: hit.name, bg: v.bg.slice(), accent: v.a, accent2: v.b, deco: hit.deco.slice(), tag: hit.tag, cta: hit.cta, base: hit.base || (R() < .5 ? 'oferta' : 'premium'), found: hit !== AI_DEFAULT, notes: [] };
+  const cols = []; Object.keys(AI_COLORS).sort((a, b) => b.length - a.length).forEach(k => { const i = n.indexOf(' ' + k + ' '); if (i >= 0 && !cols.some(c => c[1] === AI_COLORS[k])) cols.push([i, AI_COLORS[k], k]); });
+  cols.sort((a, b) => a[0] - b[0]);
+  if (cols.length) { th.accent = cols[0][1]; th.accent2 = cols[1] ? cols[1][1] : mixHex(th.accent, '#FFFFFF', .45); th.bg = [mixHex(th.accent, '#000000', .86), mixHex(cols[1] ? cols[1][1] : th.accent, '#000000', .92)]; th.notes.push('cores: ' + cols.slice(0, 2).map(c => c[2]).join(' e ')); }
+  const pc = /(\d{1,2})\s*%/.exec(n); if (pc) th.tag = pc[1] + '% OFF';
+  const q = /["“]([^"”]{2,22})["”]/.exec(raw); if (q) th.tag = q[1].toUpperCase();
+  if (/\b(minimalista|minimal|limpo|clean)\b/.test(n)) { th.deco = []; th.base = 'minimal'; th.notes.push('estilo minimalista'); }
+  if (/\b(premium|luxo)\b/.test(n)) th.base = 'premium'; if (/\bgamer\b/.test(n)) th.base = 'gamer'; if (/\bservicos?\b/.test(n)) th.base = 'servicos';
+  if (/\b(sem decoracao|sem enfeites)\b/.test(n)) th.deco = [];
+  if (/\b(confete|confetes)\b/.test(n) && !th.deco.includes('confetti')) th.deco.push('confetti');
+  if (/\b(neve)\b/.test(n) && !th.deco.includes('snow')) th.deco.push('snow');
+  if (/\b(estrelas?)\b/.test(n) && !th.deco.includes('stars')) th.deco.push('stars');
+  if (/\b(coracoes|coracao)\b/.test(n) && !th.deco.includes('hearts')) th.deco.push('hearts');
+  if (/\b(raios|luzes)\b/.test(n) && !th.deco.includes('rays')) th.deco.push('rays');
+  return th;
+}
+function aiDeco(th, R) {
+  const W = S.W, H = S.H, s = W / 1080, out = [], rnd = (a, b) => a + R() * (b - a);
+  const mk = e => { e.user = true; e.lock = true; e.deco = true; e.name = 'Decoração'; out.push(e); return e; };
+  const pal = [th.accent, th.accent2, '#F5C451', '#FFFFFF'];
+  th.deco.forEach(kind => {
+    if (kind === 'snow') for (let i = 0; i < 30; i++) { const z = rnd(6, 24) * s; mk(rect({ kind: 'ellipse', x: rnd(0, W), y: rnd(0, H), w: z, h: z, fill: '#FFFFFF', glow: '#FFFFFF', gb: z * .8, op: rnd(.35, .95) })); }
+    if (kind === 'confetti') for (let i = 0; i < 46; i++) { const z = rnd(10, 26) * s; mk(rect({ x: rnd(0, W), y: rnd(0, H), w: z, h: z * .45, r: 2 * s, rot: rnd(-80, 80), fill: pal[Math.floor(R() * pal.length)], op: rnd(.7, 1) })); }
+    if (kind === 'stars') for (let i = 0; i < 16; i++) { const z = rnd(14, 44) * s; mk(iconEl({ shape: 'star', x: rnd(0, W), y: rnd(0, H), w: z, h: z, c: R() < .5 ? '#F5C451' : th.accent2, op: rnd(.45, 1), rot: rnd(-30, 30) })); }
+    if (kind === 'hearts') for (let i = 0; i < 16; i++) { const z = rnd(22, 70) * s; mk(rect({ kind: 'heart', x: rnd(0, W), y: rnd(0, H), w: z, h: z * .9, rot: rnd(-25, 25), fill: R() < .5 ? th.accent : th.accent2, glow: th.accent, gb: z * .4, op: rnd(.35, .85) })); }
+    if (kind === 'bokeh') for (let i = 0; i < 12; i++) { const z = rnd(140, 360) * s; mk(glowEl({ x: rnd(-z / 3, W - z / 2), y: rnd(-z / 3, H - z / 2), w: z, h: z, c: R() < .5 ? th.accent : th.accent2, op: rnd(.12, .28) })); }
+    if (kind === 'grid') mk(gridEl({ x: 0, y: 0, w: W, h: H, c: th.accent, gap: 64 * s, op: .1 }));
+    if (kind === 'rays') { const px = W / 2, py = H * .42, len = Math.hypot(W, H) * .75; for (let i = 0; i < 12; i++) { const ang = i * 30 + rnd(-6, 6), rad = ang * Math.PI / 180, w = rnd(40, 110) * s; mk(rect({ kind: 'triangle', w, h: len, x: px + Math.sin(rad) * len / 2 - w / 2, y: py - Math.cos(rad) * len / 2 - len / 2, rot: ang, fill: i % 2 ? th.accent : th.accent2, ang: 270, fade: true, op: rnd(.1, .2) })); } }
+  });
+  return out;
+}
+function aiRecolor(th) {
+  const map = { '#39FF14': th.accent, '#7CFF5B': mixHex(th.accent, '#FFFFFF', .3), '#C4B5FD': mixHex(th.accent2, '#FFFFFF', .35), '#EDE9FE': mixHex(th.accent2, '#FFFFFF', .7) };
+  const keys = ['color', 'color2', 'fill', 'fill2', 'c', 'c1', 'c2', 'stroke', 'glow', 'bc', 'cur', 'dot', 'outline'];
+  S.els.forEach(e => {
+    keys.forEach(k => { const v = e[k]; if (typeof v === 'string' && map[v.toUpperCase()]) e[k] = map[v.toUpperCase()]; });
+    if (e.name === 'Fundo') { e.fill = th.bg[0]; e.fill2 = th.bg[1]; e.ang = 90; }
+  });
+}
+function aiBuild(prompt, seed) {
+  const th = aiTheme(prompt, seed), R = prng(seed * 7919 + 13);
+  S.els = S.els.filter(e => e.user && !e.deco); S.layout = th.base; S.accent = th.accent2; buildLayout(); S.photo.zoom = S.photo.zoom || 1;
+  aiRecolor(th); S.d.cta1 = th.cta;
+  let at = 0; while (at < S.els.length && S.els[at].lock && (S.els[at].type === 'rect' || S.els[at].type === 'glow')) at++;
+  S.els.splice(at, 0, ...aiDeco(th, R));
+  const ph = S.els.find(e => e.type === 'photo'), W = S.W, H = S.H;
+  const d = (ph ? Math.min(ph.w, ph.h) : W * .6) * .36, cx = ph ? ph.x + ph.w * .13 : W * .8, cy = ph ? ph.y + ph.h * .9 : H * .22;
+  const ink = lumOf(th.accent) > .55 ? INK : '#FFFFFF', rot = -10 + Math.round(R() * 8);
+  const sticker = rect({ name: 'Selo da campanha', kind: 'burst', n: 16, inner: .84, x: cx - d / 2, y: cy - d / 2, w: d, h: d, rot, fill: th.accent, fill2: mixHex(th.accent, th.accent2, .6), ang: 45, stroke: '#FFFFFF', sw: Math.max(2, d * .015), glow: th.accent, gb: d * .25, user: true });
+  const label = txt({ name: 'Texto do selo', text: th.tag, x: cx - d * .36, y: cy - d * .21, w: d * .72, h: d * .42, rot, size: d * .2, weight: 800, color: ink, align: 'center', valign: 'middle', fit: true, upper: true, lh: 1, user: true });
+  S.els.push(sticker, label); S.sel = null; S.dirty = false;
+  return th;
+}
+let aiSeed = 1, aiLast = '';
+function aiRun(newSeed) {
+  const p = $('#aiPrompt').value.trim(); if (p.length < 2) { toast('Descreva o layout. Ex.: layout de Natal vermelho e dourado.'); return; }
+  if (S.dirty && !confirm('Gerar um layout novo substitui os ajustes manuais atuais (elementos que você adicionou são mantidos). Continuar?')) return;
+  if (newSeed) aiSeed = Math.floor(Math.random() * 1e6) + 1; else if (p !== aiLast) aiSeed = 1; aiLast = p;
+  const th = aiBuild(p, aiSeed); syncAll(); commit();
+  $('#aiOut').innerHTML = `<b>${esc(th.name)}</b>${th.found ? '' : ' (ocasião não reconhecida: usei o estilo padrão)'} · cores ${esc(th.accent)} / ${esc(th.accent2)} · decoração: ${th.deco.length ? esc(th.deco.join(', ')) : 'nenhuma'} · selo “${esc(th.tag)}”${th.notes.length ? ' · ' + esc(th.notes.join(', ')) : ''}.<br>Veja na tela. Gostou? Salve com um nome (ex.: ${esc(th.name)}) para usar em lote nos anúncios.`;
+  $('#aiAgain').disabled = false; $('#aiSave').disabled = false; $('#aiSave').dataset.name = th.name; $('#aiSave').dataset.theme = th.name;
+}
+$('#bAI').onclick = () => { $('#aiDlg').showModal(); $('#aiPrompt').focus(); };
+$('#aiClose').onclick = () => $('#aiDlg').close();
+$('#aiGo').onclick = () => aiRun(false); $('#aiAgain').onclick = () => aiRun(true);
+$('#aiEx').addEventListener('click', ev => { const b = ev.target.closest('[data-ex]'); if (b) { $('#aiPrompt').value = b.dataset.ex; aiRun(false); } });
+$('#aiSave').onclick = () => { $('#aiDlg').close(); $('#dlg').showModal(); renderLib(); $('#saveName').value = 'Layout ' + ($('#aiSave').dataset.name || 'IA'); $('#saveName').focus(); };
 
 /* ------------------------------ início ------------------------------ */
 buildLayout(); sizeCanvas(); syncAll(); commit(); toParent({ type: 'sz:ready' });

@@ -50,7 +50,7 @@
 
   /* ------------------------------ estrutura ------------------------------ */
   const TABS = [['vendas', 'Vendas', 'box', () => can('vendas')], ['adm', 'Adm', 'shield', () => A.user.isAdmin], ['produtos', 'Produtos', 'cpu', () => can('produtos')], ['valores', 'Valores Serviços', 'board', () => can('configuracoes')], ['contatos', 'Contatos', 'wa', () => can('configuracoes')], ['feedbacks', 'Feedbacks', 'star', () => can('vendas') || can('produtos')], ['config', 'Configurações', 'wrench', () => can('configuracoes')]];
-  const SUBS = [['indicadores', 'Indicadores'], ['logins', 'Logins'], ['postagem', 'Postagem de vendas'], ['layouts', 'Criação de layouts']];
+  const SUBS = [['indicadores', 'Indicadores'], ['logins', 'Logins'], ['postagem', 'Postagem de vendas'], ['ofertas', 'Agenda de ofertas'], ['layouts', 'Criação de layouts']];
   function boot() {
     const first = TABS.find(t => t[3]());
     if (!first) { store.clear(); return showLogin('Seu usuário não tem acesso a nenhuma área do painel.'); }
@@ -171,27 +171,43 @@
   const driveId = u => { const m = /\/d\/([A-Za-z0-9_-]{10,80})/.exec(String(u || '')); return m ? m[1] : ''; };
   const parseSpecs = t => String(t || '').split(/\r?\n/).map(l => { const i = l.indexOf(':'); return i > 0 ? { item: l.slice(0, i).trim(), valor: l.slice(i + 1).trim() } : (l.trim() ? { item: l.trim(), valor: '' } : null); }).filter(Boolean);
   function productsView(el) {
-    el.innerHTML = `<h1>${A.view === 'adm' ? 'Postagem de vendas' : 'Produtos'}</h1><p class="lead">Cadastre, edite, publique e despublique anúncios.</p>
+    el.innerHTML = `<h1>${A.view === 'adm' ? 'Postagem de vendas' : 'Produtos'}</h1><p class="lead">Cadastre, edite, publique e despublique anúncios. Marque vários para trocar o layout das artes de uma vez.</p>
       <div class="bar"><label class="fld"><span class="sr">Buscar</span><input class="in" id="pq" placeholder="Buscar por nome, código ou categoria"></label>
         <label class="fld"><span class="sr">Situação</span><select class="in" id="pst"><option value="">Todas as situações</option><option>Publicado</option><option>Rascunho</option><option>Despublicado</option></select></label>
-        <span class="grow"></span><button class="btn btn-pri" id="pnew">+ Novo anúncio</button></div><div id="pbody">${loadingHtml}</div>`;
-    let list = [];
+        <label class="fld"><span class="sr">Categoria</span><select class="in" id="pcat"><option value="">Todas as categorias</option>${SZ.CATEGORIES.map(c => `<option>${esc(c)}</option>`).join('')}</select></label>
+        <span class="grow"></span><button class="btn btn-pri" id="pnew">+ Novo anúncio</button></div>
+      <div class="bulk" id="pbulk" hidden></div><div id="pbody">${loadingHtml}</div>`;
+    let list = [], shown = []; const sel = new Set();
+    const bulk = () => {
+      const b = $('#pbulk'); b.hidden = !sel.size; if (!sel.size) return;
+      b.innerHTML = `<b>${sel.size} selecionado${sel.size > 1 ? 's' : ''}</b><button class="btn btn-sm btn-pri" id="bl">Aplicar layout</button><button class="btn btn-sm" id="bo">Criar oferta com a seleção</button><button class="btn btn-sm btn-ghost" id="bx">Limpar seleção</button>`;
+      $('#bx').onclick = () => { sel.clear(); draw(); };
+      $('#bl').onclick = () => bulkArt(list.filter(p => sel.has(p.id)), { mode: 'choose', done: load });
+      $('#bo').onclick = () => { A.offerIds = [...sel]; location.hash = '#/adm/ofertas'; };
+    };
     const draw = () => {
-      const q = nn($('#pq').value), st = $('#pst').value, b = $('#pbody');
-      const r = list.filter(p => (!st || p.status === st) && (!q || nn([p.nome, p.id, p.categoria, p.marca, p.modelo].join(' ')).indexOf(q) >= 0));
-      b.innerHTML = r.length ? `<div class="tw"><table class="tbl rs"><thead><tr><th></th><th>Anúncio</th><th>Categoria</th><th class="num">Preço</th><th class="num">Estoque</th><th>Situação</th><th></th></tr></thead><tbody>
-        ${r.map(p => `<tr data-id="${esc(p.id)}"><td>${p.fotoPrincipal ? `<img class="thumb" src="${esc(SZ.thumb(p.fotoPrincipal, 96))}" alt="" loading="lazy">` : `<span class="thumb" style="display:grid;place-items:center;color:var(--mute)">${SZ.icon(SZ.catIcon(p.categoria), 20)}</span>`}</td>
-        <td data-l="Anúncio"><b>${esc(p.nome)}</b><br><small style="color:var(--mute)">${esc(p.id)} ${p.condicao ? '· ' + esc(p.condicao) : ''}</small></td><td data-l="Categoria">${esc(p.categoria)}</td>
-        <td class="num" data-l="Preço">${SZ.brl(p.precoAtual)}${p.selo ? `<br><small style="color:var(--neon2)">${esc(p.selo.texto)}</small>` : ''}</td><td class="num" data-l="Estoque">${p.estoque}</td>
+      const q = nn($('#pq').value), st = $('#pst').value, ct = $('#pcat').value, b = $('#pbody');
+      shown = list.filter(p => (!st || p.status === st) && (!ct || p.categoria === ct) && (!q || nn([p.nome, p.id, p.categoria, p.subcategoria, p.marca, p.modelo].join(' ')).indexOf(q) >= 0));
+      const allOn = shown.length && shown.every(p => sel.has(p.id));
+      b.innerHTML = shown.length ? `<div class="tw"><table class="tbl rs"><thead><tr><th class="ck"><input type="checkbox" id="pall" aria-label="Selecionar todos os anúncios listados" ${allOn ? 'checked' : ''}></th><th></th><th>Anúncio</th><th>Categoria</th><th class="num">Preço</th><th class="num">Estoque</th><th>Situação</th><th></th></tr></thead><tbody>
+        ${shown.map(p => `<tr data-id="${esc(p.id)}" class="${sel.has(p.id) ? 'sel' : ''}"><td class="ck"><input type="checkbox" data-sel aria-label="Selecionar ${esc(p.nome)}" ${sel.has(p.id) ? 'checked' : ''}></td><td>${p.fotoPrincipal ? `<img class="thumb" src="${esc(SZ.thumb(p.fotoPrincipal, 96))}" alt="" loading="lazy">` : `<span class="thumb" style="display:grid;place-items:center;color:var(--mute)">${SZ.icon(SZ.catIcon(p.categoria), 20)}</span>`}</td>
+        <td data-l="Anúncio"><b>${esc(p.nome)}</b><br><small style="color:var(--mute)">${esc(p.id)} ${p.condicao ? '· ' + esc(p.condicao) : ''}${p.layoutArte ? ' · arte ' + esc(layName(p.layoutArte)) : ''}</small></td><td data-l="Categoria">${esc(p.categoria)}${p.subcategoria ? `<br><small style="color:var(--mute)">${esc(p.subcategoria)}</small>` : ''}</td>
+        <td class="num" data-l="Preço">${SZ.brl(p.precoAtual)}${p.ofertaAtiva ? `<br><small style="color:var(--neon2)">Oferta: ${esc(p.ofertaAtiva.nome)}</small>` : p.selo ? `<br><small style="color:var(--neon2)">${esc(p.selo.texto)}</small>` : ''}</td><td class="num" data-l="Estoque">${p.estoque}</td>
         <td data-l="Situação"><span class="pill ${p.status === 'Publicado' ? 'ok' : p.status === 'Rascunho' ? 'mute' : 'warn'}">${esc(p.status)}</span></td>
         <td><div class="acts"><button class="btn btn-sm" data-ed>Editar</button><button class="btn btn-sm" data-tg>${p.status === 'Publicado' ? 'Despublicar' : 'Publicar'}</button></div></td></tr>`).join('')}</tbody></table></div>`
         : `<div class="empty">${list.length ? 'Nenhum anúncio com esses filtros.' : 'Nenhum anúncio cadastrado ainda. Clique em “Novo anúncio” para começar.'}</div>`;
+      bulk();
     };
     async function load() {
       $('#pbody').innerHTML = loadingHtml;
-      try { list = await api('listAllProducts'); draw(); } catch (e) { $('#pbody').innerHTML = errHtml(e, 'pretry'); $('#pretry').onclick = load; }
+      try { list = await api('listAllProducts'); [...sel].forEach(id => { if (!list.some(p => p.id === id)) sel.delete(id); }); draw(); } catch (e) { $('#pbody').innerHTML = errHtml(e, 'pretry'); $('#pretry').onclick = load; }
     }
-    $('#pq').oninput = draw; $('#pst').onchange = draw; $('#pnew').onclick = () => productForm(null, load);
+    $('#pq').oninput = draw; $('#pst').onchange = draw; $('#pcat').onchange = draw; $('#pnew').onclick = () => productForm(null, load);
+    $('#pbody').onchange = ev => {
+      if (ev.target.id === 'pall') { shown.forEach(p => ev.target.checked ? sel.add(p.id) : sel.delete(p.id)); draw(); return; }
+      const c = ev.target.closest('[data-sel]'); if (!c) return; const id = c.closest('tr').dataset.id; c.checked ? sel.add(id) : sel.delete(id);
+      c.closest('tr').classList.toggle('sel', c.checked); const all = $('#pall'); if (all) all.checked = shown.length && shown.every(p => sel.has(p.id)); bulk();
+    };
     $('#pbody').onclick = async ev => {
       const tr = ev.target.closest('tr[data-id]'); if (!tr) return; const p = list.find(x => x.id === tr.dataset.id);
       if (ev.target.closest('[data-ed]')) productForm(p, load);
@@ -199,6 +215,45 @@
         try { await api('setProductStatus', { id: p.id, status: to }); SZ.sessionBust(); SZ.toast(to === 'Publicado' ? 'Anúncio publicado.' : 'Anúncio despublicado.'); load(); } catch (e) { fail(e); } }
     };
     load();
+  }
+  const layName = k => { const [t, id] = String(k).split(':'); return t === 'b' ? ((BUILTIN.find(x => x[0] === id) || [])[1] || id).replace(/^Layout \d+ · /, '') : 'personalizado'; };
+
+  /** Aplica/refaz a arte de vários anúncios de uma vez (layout novo, ou o mesmo layout com preços atuais). */
+  async function bulkArt(prods, o) {
+    let cloud = []; try { cloud = await api('listLayouts'); if (!Array.isArray(cloud)) cloud = []; } catch (e) { /* só padrão */ }
+    const keep = o.mode === 'keep', withArt = prods.filter(p => p.layoutArte);
+    const opts = `<optgroup label="Layouts padrão">${BUILTIN.map(([k, t]) => `<option value="b:${k}">${t}</option>`).join('')}</optgroup>${cloud.length ? `<optgroup label="Meus layouts (ex.: Natal)">${cloud.map(c => `<option value="c:${esc(c.id)}">${esc(c.nome)}${c.formato ? ' · ' + esc(c.formato) : ''}</option>`).join('')}</optgroup>` : ''}`;
+    const m = dlg({ title: keep ? 'Atualizar artes dos anúncios' : 'Aplicar layout em lote', body: `<div class="pf-cols">
+      <p class="full">${keep ? `Refaz a arte de <b>${withArt.length}</b> anúncio(s) que já têm layout, com os preços de hoje (incluindo ofertas no ar).${prods.length > withArt.length ? ` ${prods.length - withArt.length} sem arte serão ignorados.` : ''}` : `Troca a arte de <b>${prods.length}</b> anúncio(s). Cada arte usa a foto, o nome e o preço do próprio anúncio.`}</p>
+      ${keep ? '' : `<label class="fld full">Layout<select class="in" id="b_lay">${opts}</select></label><label class="fld full" id="b_fmt_r">Formato (layouts padrão)<select class="in" id="b_fmt">${ART_FMT.map(([k, t]) => `<option value="${k}">${t}</option>`).join('')}</select></label>`}
+      <div class="full note info">Mantenha esta janela aberta até terminar. Cada anúncio leva alguns segundos. A arte antiga é apagada do Drive; a foto original é preservada.</div>
+      <div class="full" id="b_prog" aria-live="polite"></div></div>`,
+      footer: '<button class="btn" id="b_x">Fechar</button><button class="btn btn-pri" id="b_go">Aplicar</button>' });
+    const E = id => $('#' + id, m.el); let stop = false;
+    if (!keep) { const f = () => { E('b_fmt_r').hidden = !E('b_lay').value.startsWith('b:'); }; E('b_lay').onchange = f; f(); }
+    E('b_x').onclick = () => { stop = true; m.close(); };
+    E('b_go').onclick = async () => {
+      const targets = keep ? withArt : prods; if (!targets.length) { E('b_prog').textContent = 'Nenhum anúncio com arte para atualizar.'; return; }
+      E('b_go').disabled = true; const bad = []; let ok = 0;
+      const lay = keep ? '' : (E('b_lay').value.startsWith('b:') ? E('b_lay').value + ':' + E('b_fmt').value : E('b_lay').value);
+      for (let i = 0; i < targets.length && !stop; i++) {
+        const p = targets[i], sel = keep ? p.layoutArte : lay;
+        E('b_prog').innerHTML = `<span class="spin"></span> ${i + 1} de ${targets.length}: ${esc(p.nome)}`;
+        try {
+          const src = (p.fotos || []).find(u => u && u !== p.fotoArte); if (!src) throw new Error('sem foto original');
+          let cfg; if (sel.startsWith('b:')) { const [, id, fm] = sel.split(':'); cfg = { builtin: id, fmt: fm || 'portrait' }; }
+          else { const c = cloud.find(x => 'c:' + x.id === sel); if (!c || !c.configuracao || !c.configuracao.els) throw new Error('layout não encontrado'); cfg = c.configuracao; }
+          const prod = { nome: p.nome, categoria: p.categoria, marca: p.marca, modelo: p.modelo, descricaoCurta: p.descricaoCurta, precoNormal: p.precoNormal, precoPromocional: p.precoPromocionalEfetivo != null ? p.precoPromocionalEfetivo : p.precoPromocional,
+            condicao: p.condicao, conservacao: p.conservacao, especificacoes: p.especificacoes, seloModo: p.seloModo, seloManual: p.seloManual || '' };
+          const u = await Art.render(cfg, prod, src), up = await api('uploadImage', { mimeType: 'image/jpeg', base64: u.split(',')[1] });
+          const r = await api('saveProductArt', { id: p.id, layoutArte: sel, fotoArte: up.url });
+          const old = driveId(r && r.antiga); if (old) api('deleteImage', { fileId: old }).catch(() => {}); ok++;
+        } catch (e) { bad.push(`${p.nome}: ${e.message || 'falhou'}`); }
+      }
+      SZ.sessionBust(); E('b_go').hidden = true;
+      E('b_prog').innerHTML = `<div class="note ${bad.length ? 'warn' : 'info'}"><b>${ok} arte(s) atualizada(s).</b>${bad.length ? `<br>${bad.length} com problema:<br>${bad.slice(0, 8).map(esc).join('<br>')}` : ''}</div>`;
+      E('b_x').textContent = 'Concluir'; if (o.done) o.done();
+    };
   }
   SZ.sessionBust = () => { try { sessionStorage.removeItem('sz_products'); } catch (e) { /* ok */ } };
 
@@ -213,6 +268,12 @@
     } finally { URL.revokeObjectURL(url); }
   }
 
+  /** Subcategorias (Configurações) e regras de margem — carregadas uma vez por sessão do painel. */
+  let rulesP = null;
+  function loadRules(force) {
+    if (force) rulesP = null;
+    return rulesP || (rulesP = Promise.all([SZ.call('getSettings').catch(() => ({})), api('getPricingRules').catch(() => null)]).then(([st, r]) => { A.subc = SZ.subcats(st.Subcategorias); if (r) A.rules = r; }));
+  }
   function productForm(p, done) {
     const isNew = !p; PF.id = p ? p.id : null; PF.rid = 'r' + Math.random().toString(36).slice(2) + Date.now().toString(36);
     PF.photos = p ? p.fotos.map(u => ({ url: u, art: !!p.fotoArte && u === p.fotoArte })) : []; PF.trash = []; PF.art = null; let CLOUD_LAY = [];
@@ -224,6 +285,8 @@
       <label class="fld full">Nome do produto *<input class="in" id="f_nome" maxlength="140" value="${esc(v.nome)}"></label>
       <label class="fld">Código / ID<input class="in" id="f_id" value="${esc(p ? p.id : 'Gerado automaticamente')}" readonly></label>
       <label class="fld">Categoria *<select class="in" id="f_cat"><option value="">Selecione…</option>${SZ.CATEGORIES.map(c => `<option ${c === v.categoria ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></label>
+      <label class="fld">Subcategoria<select class="in" id="f_sub"></select><span class="help">Tipo do produto (ex.: Teclados). Usado nas ofertas por tipo. A lista fica em Configurações.</span></label>
+      <label class="fld">Custo (R$)<input class="in" id="f_custo" inputmode="decimal" value="${p && p.custo != null ? String(p.custo).replace('.', ',') : ''}" placeholder="Quanto você pagou"><span class="help" id="f_custoh">Só você vê. Sem custo, o produto fica fora das ofertas automáticas.</span></label>
       <label class="fld">Marca<input class="in" id="f_marca" maxlength="60" value="${esc(v.marca)}"></label><label class="fld">Modelo<input class="in" id="f_modelo" maxlength="80" value="${esc(v.modelo)}"></label>
       <label class="fld full">Descrição curta<input class="in" id="f_dc" maxlength="220" value="${esc(v.descricaoCurta)}"><span class="help">Aparece no card do catálogo (até 220 caracteres).</span></label>
       <label class="fld full">Descrição completa<textarea class="in" id="f_dl" maxlength="4000">${esc(v.descricaoCompleta)}</textarea></label>
@@ -254,12 +317,26 @@
 
     const selo = () => { const s = E('f_selo').value; return s === 'auto' ? { modo: 'auto' } : s === 'none' ? { modo: 'none' } : s === 'custom' ? { modo: 'manual', texto: E('f_sc').value.trim() } : { modo: 'manual', texto: s }; };
     function preview() {
+      costHint();
       E('f_sc_r').hidden = E('f_selo').value !== 'custom';
       const cat = E('f_cat').value, svc = cat === SZ.SERVICE_CAT, n = SZ.money(E('f_pn').value), pr = SZ.money(E('f_pp').value), s = selo();
       const ok = !isNaN(n) && !isNaN(pr), pc = SZ.pricing(ok ? n || 0 : 0, ok ? pr : null, s.modo, s.texto), est = Number(E('f_est').value) || 0;
       E('f_pph').textContent = !ok ? '' : pr != null && pr > (n || 0) ? 'Atenção: o promocional não pode ser maior que o preço de venda.' : pr != null && pr === n ? 'Preços iguais: aparece só o selo, sem desconto.' : pc.desconto ? `Desconto de ${pc.desconto}% calculado automaticamente.` : '';
       E('f_prev').innerHTML = SZ.cardHtml({ id: PF.id || 'NOVO', nome: E('f_nome').value || 'Nome do produto', categoria: cat || 'Categoria', marca: E('f_marca').value, modelo: E('f_modelo').value, descricaoCurta: E('f_dc').value, condicao: E('f_cond').value, precoAtual: pc.precoAtual, precoAnterior: pc.precoAnterior, desconto: pc.desconto,
         selo: pc.selo ? { texto: pc.selo, cor: E('f_scor').value === '#39ff14' ? '' : E('f_scor').value, estilo: E('f_sest').value } : null, estoque: est, disponivel: svc || est > 0, fotoPrincipal: PF.photos[0] ? PF.photos[0].url : '' });
+    }
+    function drawSub() {
+      const cat = E('f_cat').value, cur = E('f_sub').value || v.subcategoria || '', L = (A.subc && A.subc[cat]) || [];
+      const all = cur && L.indexOf(cur) < 0 ? L.concat([cur]) : L;
+      E('f_sub').innerHTML = `<option value="">${all.length ? 'Sem subcategoria' : 'Nenhuma cadastrada para esta categoria'}</option>` + all.map(x => `<option ${x === cur ? 'selected' : ''}>${esc(x)}</option>`).join('');
+    }
+    function costHint() {
+      const n = SZ.money(E('f_pn').value), c = SZ.money(E('f_custo').value), pr = SZ.money(E('f_pp').value), R = A.rules || { margem: 20 }, h = E('f_custoh');
+      if (c == null || isNaN(c)) { h.textContent = 'Só você vê. Sem custo, o produto fica fora das ofertas automáticas.'; return; }
+      let t = `Preço sugerido pela sua margem de ${R.margem}%: ${SZ.brl(Math.round(c * (1 + R.margem / 100) * 100) / 100)}.`;
+      if (n > 0) t += ` Margem atual: ${(Math.round((n / c - 1) * 1000) / 10).toString().replace('.', ',')}%.`;
+      if (pr > 0 && pr < c) t += ' ATENÇÃO: o promocional está abaixo do custo.';
+      h.textContent = t;
     }
     function drawPhotos() {
       E('f_ph').innerHTML = PF.photos.map((f, i) => `<div class="ph ${i === 0 ? 'main' : ''}" data-i="${i}"><img src="${esc(SZ.thumb(f.url, 200))}" alt="Foto ${i + 1}">${f.art ? '<span class="tag">ARTE</span>' : i === 0 ? '<span class="tag">PRINCIPAL</span>' : ''}${f.art ? '<div class="tools"><span class="help" style="padding:6px">gerada pelo layout</span></div>' : '<div class="tools"><button type="button" data-a="star" title="Tornar principal" aria-label="Tornar principal">★</button><button type="button" data-a="l" aria-label="Mover para a esquerda">◀</button><button type="button" data-a="r" aria-label="Mover para a direita">▶</button><button type="button" data-a="x" aria-label="Remover">✕</button></div>'}</div>`).join('') || '<span class="help">Nenhuma foto. Adicione pelo menos uma para publicar.</span>';
@@ -289,6 +366,8 @@
       up.textContent = '';
     };
     m.el.addEventListener('input', preview); m.el.addEventListener('change', preview); drawPhotos();
+    drawSub(); E('f_cat').addEventListener('change', () => { E('f_sub').value = ''; v.subcategoria = ''; drawSub(); });
+    loadRules().then(() => { drawSub(); preview(); });
 
     /* ----- arte promocional ----- */
     const layOpts = () => `<option value="">Sem arte — usar apenas as fotos</option><optgroup label="Layouts padrão">${BUILTIN.map(([k, t]) => `<option value="b:${k}">${t}</option>`).join('')}</optgroup>${CLOUD_LAY.length ? `<optgroup label="Meus layouts">${CLOUD_LAY.map(c => `<option value="c:${esc(c.id)}">${esc(c.nome)}${c.formato ? ' · ' + esc(c.formato) : ''}</option>`).join('')}</optgroup>` : ''}`;
@@ -331,6 +410,7 @@
       if (!svc && !d.condicao) er.push('Escolha a condição: Novo ou Seminovo.');
       const n = SZ.money(d.precoNormal), p = SZ.money(d.precoPromocional);
       if (isNaN(n) || (!svc && !(n > 0))) er.push('Informe um preço de venda válido (ex.: 1.299,90).');
+      const cu = SZ.money(d.custo); if (isNaN(cu) || (cu != null && cu < 0)) er.push('Custo inválido (ex.: 850,00).');
       if (isNaN(p) || (p != null && p <= 0)) er.push('Preço promocional inválido.'); else if (p != null && n != null && !isNaN(n) && p > n) er.push('O preço promocional não pode ser maior que o preço de venda.');
       if (!svc && (d.estoque === '' || !(Number(d.estoque) >= 0) || Math.floor(Number(d.estoque)) !== Number(d.estoque))) er.push('Informe o estoque (número inteiro, 0 ou mais).');
       if (d.seloModo === 'manual' && !d.seloManual) er.push('Digite o texto do selo personalizado.');
@@ -341,7 +421,7 @@
     E('f_save').onclick = async () => {
       const s = selo(), dpv = E('f_dp').value;
       const d = { requestId: PF.rid, id: PF.id || undefined, nome: E('f_nome').value.trim(), categoria: E('f_cat').value, marca: E('f_marca').value, modelo: E('f_modelo').value, descricaoCurta: E('f_dc').value, descricaoCompleta: E('f_dl').value, especificacoes: E('f_esp').value,
-        condicao: E('f_cond').value, conservacao: E('f_cons').value, precoNormal: E('f_pn').value, precoPromocional: E('f_pp').value, estoque: E('f_est').value, status: E('f_st').value, seloModo: s.modo, seloManual: s.texto || '',
+        condicao: E('f_cond').value, conservacao: E('f_cons').value, custo: E('f_custo').value, subcategoria: E('f_sub').value, precoNormal: E('f_pn').value, precoPromocional: E('f_pp').value, estoque: E('f_est').value, status: E('f_st').value, seloModo: s.modo, seloManual: s.texto || '',
         seloCor: E('f_scor').value === '#39ff14' ? '' : E('f_scor').value, seloEstilo: E('f_sest').value, destaque: E('f_dest').checked, dataPublicacao: dpv ? dpv.replace('T', ' ') : '', observacoes: E('f_obs').value,
         fotoPrincipal: PF.photos[0] ? PF.photos[0].url : '', fotosAdicionais: PF.photos.slice(1).map(f => f.url) };
       const er = validate(d), box = E('f_err'); box.innerHTML = er.map(x => '• ' + esc(x)).join('<br>');
@@ -368,8 +448,79 @@
     };
   }
 
+  /* ------------------------------ agenda de ofertas ------------------------------ */
+  const dtLocal = d => { const z = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}T${z(d.getHours())}:${z(d.getMinutes())}`; };
+  const fmtDt = s => { const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}:\d{2})/.exec(s || ''); return m ? `${m[3]}/${m[2]}/${m[1]} ${m[4]}` : ''; };
+  const pct = n => String(n).replace('.', ',') + '%';
+  const MOTIVO = { sem_custo: 'sem custo cadastrado', sem_preco: 'sem preço', sem_espaco: 'sem espaço acima do custo' };
+  async function offersView(el) {
+    el.innerHTML = `<h1>Agenda de ofertas</h1><p class="lead">Programe ofertas por categoria, tipo de produto ou itens escolhidos. Elas entram e saem do ar sozinhas nas datas definidas, sem mexer em cada anúncio.</p><div id="obody">${loadingHtml}</div>`;
+    await loadRules(true);
+    const R = A.rules || { margem: 20, descMax: 10, margemMin: 0 };
+    let offers = [];
+    const draw = () => {
+      $('#obody').innerHTML = `<div class="note info">Suas regras: margem de lucro <b>${pct(R.margem)}</b> · desconto máximo <b>${pct(R.descMax)}</b> · margem mínima sobre o custo <b>${pct(R.margemMin)}</b>. A oferta nunca passa do desconto máximo nem fica abaixo do custo. Produtos sem custo cadastrado ficam de fora. Para alterar as regras, vá em Configurações.</div>
+        <div class="bar"><span class="grow"></span><button class="btn btn-pri" id="onew">+ Nova oferta</button></div>
+        ${offers.length ? `<div class="tw"><table class="tbl rs"><thead><tr><th>Oferta</th><th>Aplica em</th><th class="num">Desconto</th><th>Período</th><th>Situação</th><th class="num">Itens</th><th></th></tr></thead><tbody>${offers.map(o => `<tr data-id="${esc(o.id)}">
+          <td data-l="Oferta"><b>${esc(o.nome)}</b></td><td data-l="Aplica em">${o.escopo === 'todos' ? 'Todos os produtos' : o.escopo === 'categoria' ? esc(o.categoria) + (o.subcategoria ? ' › ' + esc(o.subcategoria) : '') : o.ids.length + ' produto(s) escolhido(s)'}</td>
+          <td class="num" data-l="Desconto">${pct(o.percentual)}</td><td data-l="Período">${fmtDt(o.inicio)}<br><small style="color:var(--mute)">até ${fmtDt(o.fim)}</small></td>
+          <td data-l="Situação"><span class="pill ${o.estado === 'No ar' ? 'ok' : o.estado === 'Agendada' ? 'warn' : 'mute'}">${esc(o.estado)}</span></td>
+          <td class="num" data-l="Itens">${o.aplicados}${o.aplicados !== o.produtos ? `<small style="color:var(--mute)"> de ${o.produtos}</small>` : ''}</td>
+          <td><div class="acts"><button class="btn btn-sm" data-ed>Editar</button><button class="btn btn-sm" data-art>Atualizar artes</button><button class="btn btn-sm" data-pz>${o.status === 'Pausada' ? 'Reativar' : 'Pausar'}</button><button class="btn btn-sm btn-danger" data-del>Excluir</button></div></td></tr>`).join('')}</tbody></table></div>`
+          : '<div class="empty">Nenhuma oferta programada. Clique em “Nova oferta”.</div>'}`;
+      $('#onew').onclick = () => offerForm(null);
+    };
+    async function load() { try { offers = await api('listOffers'); draw(); if (A.offerIds) { const ids = A.offerIds; A.offerIds = null; offerForm(null, ids); } } catch (e) { $('#obody').innerHTML = errHtml(e, 'oretry'); $('#oretry').onclick = load; } }
+    $('#obody').onclick = async ev => {
+      const tr = ev.target.closest('tr[data-id]'); if (!tr) return; const o = offers.find(x => x.id === tr.dataset.id); if (!o) return;
+      if (ev.target.closest('[data-ed]')) offerForm(o);
+      if (ev.target.closest('[data-pz]')) { try { await api('saveOffer', { ...o, percentual: o.percentual, status: o.status === 'Pausada' ? 'Ativa' : 'Pausada' }); SZ.sessionBust(); load(); } catch (e) { fail(e); } }
+      if (ev.target.closest('[data-del]') && confirm(`Excluir a oferta “${o.nome}”? Os preços voltam ao normal.`)) { try { await api('deleteOffer', { id: o.id }); SZ.sessionBust(); SZ.toast('Oferta excluída.'); load(); } catch (e) { fail(e); } }
+      if (ev.target.closest('[data-art]')) { try { const all = await api('listAllProducts'); bulkArt(all.filter(p => o.idsAfetados.indexOf(p.id) >= 0), { mode: 'keep' }); } catch (e) { fail(e); } }
+    };
+    async function offerForm(o, preIds) {
+      let prods = []; try { prods = await api('listAllProducts'); } catch (e) { return fail(e); }
+      prods = prods.filter(p => p.categoria !== SZ.SERVICE_CAT);
+      const now = new Date(), end = new Date(now.getTime() + 7 * 864e5), ids = new Set(o ? o.ids : preIds || []);
+      const v = o || { nome: '', escopo: preIds ? 'produtos' : 'categoria', categoria: '', subcategoria: '', percentual: '', inicio: dtLocal(now), fim: dtLocal(end), status: 'Ativa' };
+      const m = dlg({ title: o ? 'Editar oferta' : 'Nova oferta', cls: 'wide', body: `<div class="pf-cols">
+        <label class="fld full">Nome da oferta *<input class="in" id="o_nome" maxlength="80" value="${esc(v.nome)}" placeholder="Ex.: Semana dos teclados, Natal Safezone"></label>
+        <label class="fld">Aplicar em *<select class="in" id="o_esc"><option value="categoria">Uma categoria ou tipo de produto</option><option value="produtos">Produtos escolhidos</option><option value="todos">Todos os produtos</option></select></label>
+        <label class="fld">Desconto (%) *<input class="in" id="o_pct" inputmode="decimal" value="${esc(String(v.percentual).replace('.', ','))}" placeholder="Ex.: 10"><span class="help">Limitado ao desconto máximo (${pct(R.descMax)}) e ao custo.</span></label>
+        <label class="fld" id="o_cat_r">Categoria<select class="in" id="o_cat"><option value="">Selecione…</option>${SZ.CATEGORIES.filter(c => c !== SZ.SERVICE_CAT).map(c => `<option ${c === v.categoria ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></label>
+        <label class="fld" id="o_sub_r">Tipo de produto (subcategoria)<select class="in" id="o_sub"></select></label>
+        <div class="fld full" id="o_ids_r">Produtos<input class="in" id="o_q" placeholder="Filtrar a lista"><div class="picklist" id="o_ids"></div><span class="help" id="o_cnt"></span></div>
+        <label class="fld">Início *<input class="in" type="datetime-local" id="o_ini" value="${esc(v.inicio)}"></label>
+        <label class="fld">Fim *<input class="in" type="datetime-local" id="o_fim" value="${esc(v.fim)}"></label>
+        <div class="full"><button class="btn" id="o_prev" type="button">Ver prévia dos preços</button></div>
+        <div class="full" id="o_pv" aria-live="polite"></div><div class="full formerr" id="o_err" role="alert"></div></div>`,
+        footer: '<button class="btn" id="o_x">Cancelar</button><button class="btn btn-pri" id="o_save">Salvar oferta</button>' });
+      const E = id => $('#' + id, m.el); E('o_esc').value = v.escopo; E('o_x').onclick = m.close;
+      const subOpts = () => { const L = (A.subc && A.subc[E('o_cat').value]) || []; const cur = E('o_sub').value || v.subcategoria || ''; E('o_sub').innerHTML = '<option value="">Todos os tipos da categoria</option>' + L.map(x => `<option ${x === cur ? 'selected' : ''}>${esc(x)}</option>`).join(''); };
+      const drawIds = () => { const q = nn(E('o_q').value); E('o_ids').innerHTML = prods.filter(p => ids.has(p.id) || !q || nn(p.nome + ' ' + p.categoria + ' ' + p.subcategoria).indexOf(q) >= 0).map(p => `<label class="chk"><input type="checkbox" data-id="${esc(p.id)}" ${ids.has(p.id) ? 'checked' : ''}> ${esc(p.nome)} <small style="color:var(--mute)">${esc(p.categoria)}${p.subcategoria ? ' › ' + esc(p.subcategoria) : ''}${p.custo == null ? ' · sem custo' : ''}</small></label>`).join('') || '<span class="help">Nenhum produto.</span>'; E('o_cnt').textContent = ids.size + ' selecionado(s)'; };
+      const vis = () => { const e = E('o_esc').value; E('o_cat_r').hidden = E('o_sub_r').hidden = e !== 'categoria'; E('o_ids_r').hidden = e !== 'produtos'; };
+      subOpts(); drawIds(); vis(); E('o_esc').onchange = () => { vis(); E('o_pv').innerHTML = ''; }; E('o_cat').onchange = () => { E('o_sub').value = ''; v.subcategoria = ''; subOpts(); E('o_pv').innerHTML = ''; };
+      E('o_q').oninput = drawIds; E('o_ids').onchange = ev => { const c = ev.target.closest('[data-id]'); if (!c) return; c.checked ? ids.add(c.dataset.id) : ids.delete(c.dataset.id); E('o_cnt').textContent = ids.size + ' selecionado(s)'; };
+      const body = () => ({ id: o ? o.id : undefined, nome: E('o_nome').value.trim(), escopo: E('o_esc').value, categoria: E('o_cat').value, subcategoria: E('o_sub').value, ids: [...ids], percentual: E('o_pct').value, inicio: E('o_ini').value.replace('T', ' '), fim: E('o_fim').value.replace('T', ' '), status: o ? o.status : 'Ativa' });
+      E('o_prev').onclick = async () => {
+        E('o_err').textContent = ''; E('o_pv').innerHTML = '<span class="spin"></span> Calculando…';
+        try {
+          const r = await api('previewOffer', body()), lim = r.itens.filter(x => x.ok && x.limite).length, sc = r.itens.filter(x => !x.ok).length;
+          E('o_pv').innerHTML = `<div class="note info"><b>${r.aplicados} de ${r.total}</b> produto(s) recebem a oferta${lim ? ` · ${lim} com desconto limitado pelas suas regras` : ''}${sc ? ` · ${sc} ficam de fora` : ''}.</div>
+            <div class="tw" style="max-height:300px;overflow:auto"><table class="tbl"><thead><tr><th>Produto</th><th class="num">Preço</th><th class="num">Custo</th><th class="num">Fica por</th><th class="num">Desc.</th><th class="num">Margem</th></tr></thead><tbody>${r.itens.map(x => `<tr><td>${esc(x.nome)}</td><td class="num">${SZ.brl(x.normal)}</td><td class="num">${x.custo != null ? SZ.brl(x.custo) : '—'}</td>
+            ${x.ok ? `<td class="num"><b>${SZ.brl(x.novoPreco)}</b></td><td class="num">${pct(x.pct)}${x.limite ? `<br><small style="color:var(--mute)">limite: ${esc(x.limite)}</small>` : ''}</td><td class="num">${pct(x.margemApos)}</td>` : `<td colspan="3" style="color:var(--mute)">fora: ${esc(MOTIVO[x.motivo] || x.motivo)}</td>`}</tr>`).join('') || '<tr><td colspan="6">Nenhum produto neste alvo.</td></tr>'}</tbody></table></div>`;
+        } catch (e) { E('o_pv').innerHTML = ''; E('o_err').textContent = e.message; }
+      };
+      E('o_save').onclick = async () => {
+        const b = E('o_save'); b.disabled = true; E('o_err').textContent = '';
+        try { await api('saveOffer', body()); SZ.sessionBust(); SZ.toast('Oferta salva. Ela entra no ar na data de início.'); m.close(); load(); } catch (e) { E('o_err').textContent = e.message; b.disabled = false; }
+      };
+    }
+    load();
+  }
+
   /* ---------------------------------- adm ---------------------------------- */
-  function admView(el) { ({ indicadores: indicatorsView, logins: usersView, postagem: productsView, layouts: layoutsView }[A.sub])(el); }
+  function admView(el) { ({ indicadores: indicatorsView, logins: usersView, postagem: productsView, ofertas: offersView, layouts: layoutsView }[A.sub])(el); }
 
   function indicatorsView(el) {
     el.innerHTML = `<h1>Indicadores</h1><p class="lead">Dados reais do sistema. Sem registros, os números ficam zerados.</p>
@@ -387,8 +538,27 @@
           <div class="stat"><small>Mais visualizados</small><b style="font-size:14px;margin-top:10px">Indisponível</b><em>sem contagem de visualizações</em></div></div>
         <div class="two"><div class="panel"><h2>Produtos com maior interesse</h2><div class="bars">${d.produtosComMaisInteresse.map(x => `<div class="bar-r"><span>${esc(x.nome)}</span><span>${x.total}</span><div class="tr"><i style="width:${x.total / mx * 100}%"></i></div></div>`).join('') || '<span class="help" style="color:var(--mute)">Sem registros no período.</span>'}</div></div>
           <div class="panel"><h2>Desempenho por categoria</h2><div class="bars">${d.desempenhoPorCategoria.map(x => `<div class="bar-r"><span>${esc(x.categoria)} <small style="color:var(--mute)">· ${x.vendas} venda(s) · ${SZ.brl(x.valor)}</small></span><span>${x.contatos}</span><div class="tr"><i style="width:${x.contatos / mc * 100}%"></i></div></div>`).join('') || '<span class="help" style="color:var(--mute)">Sem registros no período.</span>'}</div></div></div>
-        <div class="panel"><h2>Atividade recente no painel</h2><div class="feed">${d.atividadeRecente.map(a => `<div><b>${esc(a.operacao)}</b> · ${esc(a.usuario)} · ${SZ.dt(a.dataHora)}${a.registro ? ' · ' + esc(a.registro) : ''} <span class="pill ${a.resultado === 'OK' ? 'ok' : 'bad'}">${esc(a.resultado)}</span></div>`).join('') || 'Nenhuma atividade registrada.'}</div></div>`;
+        <div id="gv"></div><div class="panel"><h2>Atividade recente no painel</h2><div class="feed">${d.atividadeRecente.map(a => `<div><b>${esc(a.operacao)}</b> · ${esc(a.usuario)} · ${SZ.dt(a.dataHora)}${a.registro ? ' · ' + esc(a.registro) : ''} <span class="pill ${a.resultado === 'OK' ? 'ok' : 'bad'}">${esc(a.resultado)}</span></div>`).join('') || 'Nenhuma atividade registrada.'}</div></div>`;
+        turn();
       } catch (e) { b.innerHTML = errHtml(e, 'iretry'); $('#iretry').onclick = load; }
+    }
+    async function turn() {
+      const g = $('#gv'); if (!g) return; g.innerHTML = `<div class="panel"><h2>Giro de estoque e espaço para ofertas</h2>${loadingHtml}</div>`;
+      try {
+        const t = await api('turnover'), cat = $('#ic').value; let f = '';
+        const draw = () => {
+          const L = t.itens.filter(i => (!cat || i.categoria === cat) && (!f || i.classe === f));
+          g.innerHTML = `<div class="panel"><h2>Giro de estoque e espaço para ofertas</h2>
+            <p class="help" style="margin:0 0 10px">Sua estratégia: o que gira muito pode ter preço menor (volume); o que gira pouco mantém preço/margem maior. ${esc(t.criterios)} Margem de lucro alvo: ${pct(t.regras.margem)} · desconto máximo: ${pct(t.regras.descMax)}.</p>
+            <div class="cards">${t.categorias.filter(c => !cat || c.categoria === cat).map(c => `<div class="stat"><small>${esc(c.categoria)}</small><b>${c.vendas30}</b><em>vendas em 30 dias · ${c.estoque} em estoque · ${c.alto} alto giro · ${c.baixo} baixo giro</em></div>`).join('') || '<span class="help">Sem produtos publicados.</span>'}</div>
+            <div class="bar"><label class="fld">Giro<select class="in" id="gf"><option value="">Todos</option>${['Alto giro', 'Giro médio', 'Baixo giro'].map(x => `<option ${x === f ? 'selected' : ''}>${x}</option>`).join('')}</select></label></div>
+            ${L.length ? `<div class="tw"><table class="tbl rs"><thead><tr><th>Produto</th><th>Giro</th><th class="num">Vendas 30d</th><th class="num">Estoque</th><th class="num">Dias de estoque</th><th class="num">Margem</th><th class="num">Folga p/ oferta</th><th>Sugestão</th></tr></thead><tbody>${L.map(i => `<tr><td data-l="Produto"><b>${esc(i.nome)}</b><br><small style="color:var(--mute)">${esc(i.categoria)}${i.subcategoria ? ' › ' + esc(i.subcategoria) : ''}</small></td>
+              <td data-l="Giro"><span class="pill ${i.classe === 'Alto giro' ? 'ok' : i.classe === 'Baixo giro' ? 'warn' : 'mute'}">${esc(i.classe)}</span></td><td class="num" data-l="Vendas 30d">${i.vendas30}</td><td class="num" data-l="Estoque">${i.estoque}</td><td class="num" data-l="Dias de estoque">${i.diasDeEstoque == null ? '—' : i.diasDeEstoque}</td>
+              <td class="num" data-l="Margem">${i.margemAtual == null ? '<small style="color:var(--mute)">sem custo</small>' : pct(i.margemAtual)}</td><td class="num" data-l="Folga p/ oferta">${i.folgaOferta == null ? '—' : pct(i.folgaOferta)}</td><td data-l="Sugestão">${esc(i.sugestao)}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">Nenhum produto neste filtro.</div>'}</div>`;
+          $('#gf').onchange = ev => { f = ev.target.value; draw(); };
+        };
+        draw();
+      } catch (e) { g.innerHTML = ''; }
     }
     $('#igo').onclick = load; load();
   }
@@ -689,12 +859,20 @@
     try {
       const s = await SZ.call('getSettings');
       const F = [['NomeLoja', 'Nome da loja', 'in'], ['Instagram', 'Instagram (@usuario)', 'in'], ['AvisoNFe', 'Aviso fiscal exibido no rodapé', 'in'],
-        ['InformacoesComerciais', 'Informações comerciais', 'ta'], ['FormasPagamento', 'Formas de pagamento aceitas', 'ta'], ['PoliticaTroca', 'Política de troca e garantia', 'ta']];
+        ['Subcategorias', 'Subcategorias por categoria (uma linha por categoria, no formato Categoria: item1, item2)', 'ta'], ['InformacoesComerciais', 'Informações comerciais', 'ta'], ['FormasPagamento', 'Formas de pagamento aceitas', 'ta'], ['PoliticaTroca', 'Política de troca e garantia', 'ta']];
       $('#cbody').innerHTML = `<div class="note info">Só publique aqui o que a Safezone realmente oferece. Campos vazios não aparecem no site.</div><form class="panel" id="cf" style="max-width:720px"><div class="pf-cols">
         ${F.map(([k, t, ty]) => `<label class="fld full">${t}${ty === 'ta' ? `<textarea class="in" name="${k}" maxlength="2000">${esc(s[k])}</textarea>` : `<input class="in" name="${k}" maxlength="200" value="${esc(s[k])}">`}</label>`).join('')}
-        <div class="full"><button class="btn btn-pri" type="submit">Salvar configurações</button></div></div></form>`;
+        <div class="full"><button class="btn btn-pri" type="submit">Salvar configurações</button></div></div></form>
+        <form class="panel" id="rf" style="max-width:720px;margin-top:16px"><h2>Margem de lucro e ofertas</h2><p class="help">Valores privados: não aparecem no site. Margem calculada sobre o custo (custo R$ 1.000 com margem de 20% = venda por R$ 1.200).</p><div class="pf-cols">
+          <label class="fld">Margem de lucro alvo (%)<input class="in" name="margem" inputmode="decimal"><span class="help">Sugere o preço de venda a partir do custo.</span></label>
+          <label class="fld">Desconto máximo em ofertas (%)<input class="in" name="descMax" inputmode="decimal"><span class="help">Nenhuma oferta passa disso, mesmo se você pedir mais.</span></label>
+          <label class="fld">Margem mínima sobre o custo (%)<input class="in" name="margemMin" inputmode="decimal"><span class="help">0 = nunca abaixo do custo. Ex.: 5 = nunca abaixo de custo + 5%.</span></label>
+          <div class="full"><button class="btn btn-pri" type="submit">Salvar regras</button></div></div></form>`;
+      api('getPricingRules').then(r => { const f = $('#rf'); ['margem', 'descMax', 'margemMin'].forEach(k => { f.elements[k].value = String(r[k]).replace('.', ','); }); }).catch(() => {});
+      $('#rf').onsubmit = async ev => { ev.preventDefault(); const f = ev.target;
+        try { A.rules = await api('savePricingRules', { margem: f.elements.margem.value, descMax: f.elements.descMax.value, margemMin: f.elements.margemMin.value }); SZ.sessionBust(); SZ.toast('Regras salvas.'); } catch (e) { fail(e); } };
       $('#cf').onsubmit = async ev => { ev.preventDefault(); const v = {}; new FormData(ev.target).forEach((val, k) => { v[k] = val; });
-        try { await api('saveSettings', { valores: v }); try { sessionStorage.removeItem('sz_settings'); localStorage.removeItem('sz2_settings'); } catch (e) { /* ok */ } SZ.toast('Configurações salvas.'); } catch (e) { fail(e); } };
+        try { await api('saveSettings', { valores: v }); rulesP = null; try { sessionStorage.removeItem('sz_settings'); localStorage.removeItem('sz2_settings'); } catch (e) { /* ok */ } SZ.toast('Configurações salvas.'); } catch (e) { fail(e); } };
     } catch (e) { $('#cbody').innerHTML = errHtml(e, 'cretry'); $('#cretry').onclick = () => settingsView(el); }
   }
 

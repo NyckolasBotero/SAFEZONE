@@ -73,6 +73,12 @@
   SZ.dt = s => { if (!s) return '—'; const m = String(s).match(/^(\d{4})-(\d{2})-(\d{2})(?: (\d{2}:\d{2}))?/); return m ? `${m[3]}/${m[2]}/${m[1]}${m[4] ? ' ' + m[4] : ''}` : s; };
   SZ.thumb = (u, w) => (u && /^https:\/\/lh3\.googleusercontent\.com\/d\//.test(u) && u.indexOf('=') < 0) ? `${u}=w${w}` : u;
   SZ.SERVICE_CAT = 'Serviços de informática';
+  /** "Periféricos: Teclados, Mouses" (uma categoria por linha) -> { 'Periféricos': ['Teclados','Mouses'] } */
+  SZ.subcats = function (text) {
+    const out = {};
+    String(text || '').split(/\r?\n/).forEach(l => { const i = l.indexOf(':'); if (i < 1) return; const k = l.slice(0, i).trim(), v = l.slice(i + 1).split(',').map(x => x.trim()).filter(Boolean); if (k && v.length) out[k] = Array.from(new Set(v)); });
+    return out;
+  };
   SZ.CATEGORIES = ['Placas de vídeo', 'Memórias RAM', 'Processadores', 'Placas-mãe', 'SSDs e HDs', 'Fontes de alimentação', 'Gabinetes', 'Coolers e refrigeração', 'Periféricos', 'Kits e componentes diversos', SZ.SERVICE_CAT];
   /** Mesma regra do backend (usada só na prévia do painel). */
   SZ.pricing = function (normal, promo, modo, manual) {
