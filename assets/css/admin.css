@@ -98,3 +98,5 @@ dialog.dlg::backdrop{background:rgba(0,0,0,.7);backdrop-filter:blur(3px)}
   table.tbl.rs td::before{content:attr(data-l);color:var(--mute);font-size:12px;text-transform:uppercase;letter-spacing:.05em;text-align:left;flex:none}
   .tbl .num{text-align:right}
 }
+.artbox{border:1px solid rgba(57,255,20,.3);border-radius:14px;padding:12px 14px;background:rgba(57,255,20,.04);display:grid;gap:6px}
+.artbox>b{font-size:14px}

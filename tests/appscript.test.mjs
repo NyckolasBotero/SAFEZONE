@@ -14,6 +14,7 @@ test('login migra senha, bloqueia tentativas e sessões respeitam permissões', 
   assert.ok(!JSON.stringify(ok).includes('SenhaForte123'));
   assert.ok(e.call('login', { login: 'dono@safezone.com', password: 'SenhaForte123' }).ok); // login pós-migração
   const v = e.call('login', { login: 'vendas@safezone.com', password: 'Outra12345' }).data.token;
+  assert.equal(e.call('listLayouts', {}, v).error.code, 'FORBIDDEN'); // só Vendas: sem acesso aos layouts
   assert.equal(e.call('listUsers', {}, v).error.code, 'FORBIDDEN');
   assert.equal(e.call('saveProduct', {}, v).error.code, 'FORBIDDEN');
   assert.ok(e.call('listSales', {}, v).ok);

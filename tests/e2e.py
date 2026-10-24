@@ -54,6 +54,25 @@ with sync_playwright() as p:
     pg.click('#f_save'); pg.wait_for_function("document.querySelectorAll('#pbody tr[data-id]').length==2")
     # terceiro: rascunho (não deve aparecer no site)
     new_product('Item Rascunho','Memórias RAM','Novo','100,00','',2,'Rascunho'); pg.click('#f_save'); pg.wait_for_function("document.querySelectorAll('#pbody tr[data-id]').length==3")
+    # ---------- arte automática pelo layout ----------
+    new_product('Mouse Com Arte','Periféricos','Novo','200,00','150,00',3,'Publicado',
+        lambda: (pg.set_input_files('#f_file','/home/claude/safezone/tests/assets/foto-teste.jpg'), pg.wait_for_selector('.ph')))
+    pg.select_option('#f_lay','b:oferta'); pg.click('#f_artbtn'); pg.wait_for_selector('#f_artimg:not([hidden])', timeout=60000)
+    ok(pg.evaluate("document.querySelector('#f_artimg').naturalWidth")==1080, 'arte gerada em 1080 px sem baixar nada')
+    pg.locator('#f_artimg').screenshot(path=str(OUT/'arte_gerada.png'))
+    pg.click('#f_save'); pg.wait_for_function("document.querySelectorAll('#pbody tr[data-id]').length==4", timeout=60000)
+    listing=lambda: pg.evaluate("""async()=>{const r=await fetch('https://script.google.com/macros/s/x/exec',{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({action:'listProducts',data:{}})});return (await r.json()).data}""")
+    prod=[x for x in listing() if x['nome']=='Mouse Com Arte'][0]
+    ok(len(prod['fotos'])==2 and prod['fotoPrincipal']==prod['fotos'][0], 'anúncio salvo com a arte como foto principal + foto original: '+str(len(prod['fotos'])))
+    pg.click('#pbody tr[data-id]:has-text("Mouse Com Arte") [data-ed]'); pg.wait_for_selector('#f_lay')
+    ok(pg.input_value('#f_lay')=='b:oferta' and 'ARTE' in pg.inner_text('#f_ph'), 'ao reabrir, layout lembrado e foto marcada como ARTE')
+    pg.select_option('#f_lay','b:premium'); pg.click('#f_save'); pg.wait_for_selector('.toast.show'); pg.wait_for_timeout(800)
+    prod2=[x for x in listing() if x['nome']=='Mouse Com Arte'][0]
+    ok(len(prod2['fotos'])==2 and prod2['fotoPrincipal']!=prod['fotoPrincipal'], 'trocar o layout gera outra arte sem duplicar fotos')
+    pg.click('#pbody tr[data-id]:has-text("Mouse Com Arte") [data-ed]'); pg.wait_for_selector('#f_lay'); pg.select_option('#f_lay',''); pg.click('#f_save'); pg.wait_for_selector('.toast.show'); pg.wait_for_timeout(800)
+    prod3=[x for x in listing() if x['nome']=='Mouse Com Arte'][0]
+    ok(len(prod3['fotos'])==1, 'sem layout: volta a usar só a foto original')
+    pg.click('#pbody tr[data-id]:has-text("Mouse Com Arte") [data-ed]'); pg.wait_for_selector('#f_lay'); pg.select_option('#f_st','Rascunho'); pg.click('#f_save'); pg.wait_for_selector('.toast.show'); pg.wait_for_timeout(800)
     # ---------- site público ----------
     sp=ctx.new_page(); watch(sp,'site'); sp.goto(BASE+'/index.html'); sp.wait_for_selector('.card')
     ok(sp.locator('.card').count()>=2, 'home lista produtos publicados')

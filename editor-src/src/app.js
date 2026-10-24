@@ -866,19 +866,44 @@ $('#libFile').onchange = ev => {
 };
 
 /* -------------------- integração com os anúncios cadastrados -------------------- */
+const photoSrc = u => /^https:\/\/lh3\.googleusercontent\.com\/d\/[^=]*$/.test(u) ? u + '=w1600' : u;
+const loadImg = u => new Promise((ok, no) => { const im = new Image(); im.crossOrigin = 'anonymous'; im.onload = () => ok(im); im.onerror = () => no(new Error('Não foi possível carregar a foto do anúncio.')); im.src = photoSrc(u); });
+function fillProduct(p) {
+  const w = String(p.nome || '').trim().split(/\s+/);
+  const t1 = w.length > 2 ? w.slice(0, -2).join(' ') : p.nome, t2 = w.length > 2 ? w.slice(-2).join(' ') : '';
+  const sp = (p.especificacoes || []).slice(0, 4);
+  Object.assign(S.d, { category: p.categoria || '', title1: t1 || '', title2: t2, desc: p.descricaoCurta || '', infoTop: [p.marca, p.modelo].filter(Boolean).join(' \u00b7 ').toUpperCase(),
+    priceNormal: p.precoNormal != null ? brl(p.precoNormal) : '', pricePromo: p.precoPromocional != null ? brl(p.precoPromocional) : '',
+    condition: p.condicao || '', conservation: p.conservacao || '',
+    badgeMode: p.seloModo === 'none' ? 'none' : p.seloModo === 'manual' ? 'custom' : 'auto', badgeCustom: p.seloManual || '' });
+  for (let i = 0; i < 4; i++) { S.d['sk' + i] = sp[i] ? sp[i].item : ''; S.d['sv' + i] = sp[i] ? sp[i].valor : ''; }
+}
+let renderQ = Promise.resolve();
+/** Gera a arte sem usar a tela: layout (salvo ou padrão) + dados do anúncio + foto. Devolve um data URL. */
+async function renderArt(cfg, p, photoUrl, type) {
+  cfg = cfg || {};
+  if (cfg.els) restore(JSON.stringify({ ...cfg, uid }));
+  else {
+    const f = FORMATS[cfg.fmt] ? cfg.fmt : 'portrait';
+    S.fmt = f; S.W = FORMATS[f][0]; S.H = FORMATS[f][1]; S.layout = LAYOUTS[cfg.builtin] ? cfg.builtin : 'premium';
+    S.accent = cfg.accent || ACCENTS[0][1]; S.d = { ...DEF }; S.els = []; buildLayout(); sizeCanvas();
+  }
+  fillProduct(p);
+  if (photoUrl) setPhoto(await loadImg(photoUrl), p.nome);
+  if (!LOGO.complete) await new Promise(r => LOGO.addEventListener('load', r, { once: true }));
+  try { await Promise.all([300, 400, 500, 600, 700, 800].map(w => document.fonts.load(`${w} 40px Poppins`))); await document.fonts.ready; } catch (e) { /* segue */ }
+  const c = document.createElement('canvas'); c.width = S.W; c.height = S.H; const x = c.getContext('2d');
+  x.fillStyle = '#080A08'; x.fillRect(0, 0, S.W, S.H); drawScene(x, true);
+  S.sel = null; syncAll(); render();
+  return c.toDataURL(type || 'image/jpeg', .92);
+}
 const API = {
   applyProduct(p) {
-    const w = String(p.nome || '').trim().split(/\s+/);
-    const t1 = w.length > 2 ? w.slice(0, -2).join(' ') : p.nome, t2 = w.length > 2 ? w.slice(-2).join(' ') : '';
-    const sp = (p.especificacoes || []).slice(0, 4);
-    Object.assign(S.d, { category: p.categoria || '', title1: t1 || '', title2: t2, desc: p.descricaoCurta || '', infoTop: [p.marca, p.modelo].filter(Boolean).join(' · ').toUpperCase(),
-      priceNormal: p.precoNormal != null ? brl(p.precoNormal) : '', pricePromo: p.precoPromocional != null ? brl(p.precoPromocional) : '',
-      condition: p.condicao || '', conservation: p.conservacao || '',
-      badgeMode: p.seloModo === 'none' ? 'none' : p.seloModo === 'manual' ? 'custom' : 'auto', badgeCustom: p.seloManual || '' });
-    for (let i = 0; i < 4; i++) { S.d['sk' + i] = sp[i] ? sp[i].item : ''; S.d['sv' + i] = sp[i] ? sp[i].valor : ''; }
-    if (p.fotoPrincipal) { const im = new Image(); im.crossOrigin = 'anonymous'; im.onload = () => setPhoto(im, p.nome); im.onerror = () => toast('Não foi possível carregar a foto do anúncio. Envie manualmente.'); im.src = /^https:\/\/lh3\.googleusercontent\.com\/d\/[^=]*$/.test(p.fotoPrincipal) ? p.fotoPrincipal + '=w1600' : p.fotoPrincipal; }
+    fillProduct(p);
+    if (p.fotoPrincipal) loadImg(p.fotoPrincipal).then(im => setPhoto(im, p.nome)).catch(() => toast('Não foi possível carregar a foto do anúncio. Envie manualmente.'));
     syncData(); render(); renderLayers(); commit();
   },
+  renderArt: (cfg, p, photoUrl, type) => (renderQ = renderQ.then(() => renderArt(cfg, p, photoUrl, type), () => renderArt(cfg, p, photoUrl, type))),
   setProducts(list) {
     const sel = $('#prodSel'); if (!sel) return;
     sel.innerHTML = '<option value="">Selecione…</option>' + list.map((p, i) => `<option value="${i}">${esc(p.nome)} · ${esc(p.id)}</option>`).join('');
@@ -889,10 +914,11 @@ const API = {
   getState: () => JSON.parse(snapState()), exportPng: () => exportImg('image/png')
 };
 window.SafezoneEditor = API;
-window.addEventListener('message', ev => { if (ev.origin !== location.origin) return; if (ev.data && ev.data.type === 'sz:cloud') API.setCloud(ev.data.layouts); if (ev.data && ev.data.type === 'sz:products') API.setProducts(ev.data.products || []); if (ev.data && ev.data.type === 'sz:product') API.applyProduct(ev.data.product); });
+window.addEventListener('message', ev => { if (ev.origin !== location.origin) return; if (ev.data && ev.data.type === 'sz:cloud') API.setCloud(ev.data.layouts); if (ev.data && ev.data.type === 'sz:products') API.setProducts(ev.data.products || []); if (ev.data && ev.data.type === 'sz:product') API.applyProduct(ev.data.product);
+  if (ev.data && ev.data.type === 'sz:render') API.renderArt(ev.data.config, ev.data.product, ev.data.photo).then(u => toParent({ type: 'sz:rendered', reqId: ev.data.reqId, dataUrl: u }), er => toParent({ type: 'sz:rendered', reqId: ev.data.reqId, error: (er && er.message) || 'Falha ao gerar a arte.' })); });
 
 /* ------------------------------ início ------------------------------ */
-buildLayout(); sizeCanvas(); syncAll(); commit();
+buildLayout(); sizeCanvas(); syncAll(); commit(); toParent({ type: 'sz:ready' });
 if (document.fonts && document.fonts.load) {
   Promise.all([300, 400, 500, 600, 700, 800].map(w => document.fonts.load(`${w} 40px Poppins`))).then(() => render()).catch(() => {});
 }

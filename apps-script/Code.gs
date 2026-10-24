@@ -46,7 +46,8 @@ const SHEETS = {
   Anuncios: ['ID', 'Nome', 'Categoria', 'Marca', 'Modelo', 'DescricaoCurta', 'DescricaoCompleta',
     'Especificacoes', 'Condicao', 'Conservacao', 'PrecoNormal', 'PrecoPromocional', 'Estoque', 'Status',
     'FotoPrincipal', 'FotosAdicionais', 'SeloModo', 'SeloManual', 'SeloPromocional', 'SeloCor', 'SeloEstilo',
-    'PercentualDesconto', 'Destaque', 'DataPublicacao', 'ObservacoesInternas', 'DataCriacao', 'DataAtualizacao', 'CriadoPor'],
+    'PercentualDesconto', 'Destaque', 'DataPublicacao', 'ObservacoesInternas', 'DataCriacao', 'DataAtualizacao', 'CriadoPor',
+    'LayoutArte', 'FotoArte'],
   Vendas: ['IDVenda', 'Data', 'IDAnuncio', 'NomeProduto', 'Quantidade', 'ValorUnitario', 'ValorTotal',
     'Status', 'Origem', 'Observacoes', 'DataAtualizacao'],
   Layouts: ['IDLayout', 'Nome', 'Formato', 'Configuracao', 'DataCriacao', 'DataAtualizacao', 'CriadoPor'],
@@ -150,7 +151,7 @@ const ROUTES = {
   saveUser:        { auth: 'adm',      fn: saveUser_, write: true },
   revokeSessions:  { auth: 'adm',      fn: revokeSessions_, write: true },
   listAudit:       { auth: 'adm',      fn: listAudit_ },
-  listLayouts:     { auth: 'adm',      fn: listLayouts_ },
+  listLayouts:     { auth: 'layouts',      fn: listLayouts_ },
   saveLayout:      { auth: 'adm',      fn: saveLayout_, write: true },
   deleteLayout:    { auth: 'adm',      fn: deleteLayout_, write: true }
 };
@@ -339,6 +340,7 @@ function normAccess_(s) {
 function allowed_(u, area) {
   if (u.isAdmin) return true;
   if (area === 'adm') return false;
+  if (area === 'layouts') return u.perms.indexOf('produtos') >= 0;
   const need = { produtos: 'produtos', vendas: 'vendas', config: 'configuracoes' }[area];
   return u.perms.indexOf(need) >= 0;
 }
@@ -504,7 +506,8 @@ function validateProduct_(d) {
     Status: status, FotoPrincipal: principal, FotosAdicionais: JSON.stringify(extras),
     SeloModo: modo, SeloManual: manual, SeloCor: cor, SeloEstilo: estilo,
     Destaque: d.destaque ? 'Sim' : 'Não', DataPublicacao: dataPub,
-    ObservacoesInternas: s(d.observacoes, 1000)
+    ObservacoesInternas: s(d.observacoes, 1000),
+    LayoutArte: s(d.layoutArte, 40), FotoArte: validUrl_(s(d.fotoArte, 400)) ? s(d.fotoArte, 400) : ''
   };
 }
 
@@ -533,7 +536,7 @@ function productView_(r, admin) {
     v.status = r.Status; v.observacoes = r.ObservacoesInternas; v.precoNormal = Number(r.PrecoNormal);
     v.precoPromocional = r.PrecoPromocional === '' ? null : Number(r.PrecoPromocional);
     v.seloModo = r.SeloModo || 'auto'; v.seloManual = r.SeloManual; v.seloCor = r.SeloCor; v.seloEstilo = r.SeloEstilo;
-    v.fotosAdicionais = extras; v.criadoPor = r.CriadoPor; v.dataCriacao = cell_(r.DataCriacao);
+    v.layoutArte = r.LayoutArte || ''; v.fotoArte = r.FotoArte || ''; v.fotosAdicionais = extras; v.criadoPor = r.CriadoPor; v.dataCriacao = cell_(r.DataCriacao);
   }
   return v;
 }

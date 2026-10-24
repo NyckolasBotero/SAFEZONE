@@ -140,7 +140,36 @@
   }
 
   /* ------------------------------- produtos ------------------------------- */
-  const PF = { photos: [], id: null, rid: '' };
+  const PF = { photos: [], id: null, rid: '', trash: [], art: null };
+  const BUILTIN = [['premium', 'Layout 01 · Produto premium'], ['oferta', 'Layout 02 · Super oferta'], ['seminovo', 'Layout 03 · Seminovo selecionado'], ['gamer', 'Layout 04 · Setup gamer'], ['minimal', 'Layout 05 · Oferta minimalista'], ['servicos', 'Layout 06 · Divulgação de serviços']];
+  const ART_FMT = [['portrait', 'Feed 1080×1350'], ['square', 'Quadrado 1080×1080'], ['story', 'Stories 1080×1920'], ['banner', 'Banner 1200×628']];
+  /** Gera a arte do anúncio usando o editor em uma página oculta (nada é baixado). */
+  const Art = {
+    fr: null, pend: {}, ready: null,
+    init() {
+      if (this.fr) return; const f = document.createElement('iframe');
+      f.src = '../editor/index.html'; f.title = 'Gerador de artes'; f.setAttribute('aria-hidden', 'true'); f.tabIndex = -1;
+      f.style.cssText = 'position:fixed;left:-12000px;top:0;width:1280px;height:800px;border:0;visibility:hidden';
+      document.body.appendChild(f); this.fr = f; let res; this.ready = new Promise(r => { res = r; });
+      window.addEventListener('message', ev => {
+        if (ev.origin !== location.origin || ev.source !== f.contentWindow || !ev.data) return;
+        if (ev.data.type === 'sz:ready') res();
+        if (ev.data.type === 'sz:rendered') { const w = this.pend[ev.data.reqId]; if (!w) return; delete this.pend[ev.data.reqId]; ev.data.error ? w.no(new Error(ev.data.error)) : w.ok(ev.data.dataUrl); }
+      });
+    },
+    async render(config, product, photo) {
+      this.init();
+      await Promise.race([this.ready, new Promise((_, no) => setTimeout(() => no(new Error('O gerador de artes não carregou. Recarregue a página.')), 25000))]);
+      const reqId = 'a' + Math.random().toString(36).slice(2);
+      return new Promise((ok, no) => {
+        this.pend[reqId] = { ok, no };
+        this.fr.contentWindow.postMessage({ type: 'sz:render', reqId, config, product, photo }, location.origin);
+        setTimeout(() => { if (this.pend[reqId]) { delete this.pend[reqId]; no(new Error('Tempo esgotado ao gerar a arte.')); } }, 45000);
+      });
+    }
+  };
+  const driveId = u => { const m = /\/d\/([A-Za-z0-9_-]{10,80})/.exec(String(u || '')); return m ? m[1] : ''; };
+  const parseSpecs = t => String(t || '').split(/\r?\n/).map(l => { const i = l.indexOf(':'); return i > 0 ? { item: l.slice(0, i).trim(), valor: l.slice(i + 1).trim() } : (l.trim() ? { item: l.trim(), valor: '' } : null); }).filter(Boolean);
   function productsView(el) {
     el.innerHTML = `<h1>${A.view === 'adm' ? 'Postagem de vendas' : 'Produtos'}</h1><p class="lead">Cadastre, edite, publique e despublique anúncios.</p>
       <div class="bar"><label class="fld"><span class="sr">Buscar</span><input class="in" id="pq" placeholder="Buscar por nome, código ou categoria"></label>
@@ -186,7 +215,7 @@
 
   function productForm(p, done) {
     const isNew = !p; PF.id = p ? p.id : null; PF.rid = 'r' + Math.random().toString(36).slice(2) + Date.now().toString(36);
-    PF.photos = p ? p.fotos.map(u => ({ url: u })) : [];
+    PF.photos = p ? p.fotos.map(u => ({ url: u, art: !!p.fotoArte && u === p.fotoArte })) : []; PF.trash = []; PF.art = null; let CLOUD_LAY = [];
     const PRESET = ['OFERTA', 'SUPER OFERTA', 'OPORTUNIDADE', 'DESTAQUE'];
     const seloSel = !p ? 'auto' : p.seloModo === 'none' ? 'none' : p.seloModo === 'manual' ? (PRESET.indexOf(p.seloManual) >= 0 ? p.seloManual : 'custom') : 'auto';
     const dp = p && p.dataPublicacao ? String(p.dataPublicacao).replace(' ', 'T').slice(0, 16) : '';
@@ -212,6 +241,10 @@
       <label class="fld">Data de publicação<input class="in" id="f_dp" type="datetime-local" value="${esc(dp)}"><span class="help">Vazio = publica ao ativar.</span></label>
       <label class="chk full"><input type="checkbox" id="f_dest" ${v.destaque ? 'checked' : ''}> Destaque na página inicial</label>
       <label class="fld full">Observações internas<textarea class="in" id="f_obs" maxlength="1000">${esc(v.observacoes)}</textarea><span class="help">Não aparecem no site.</span></label>
+      <div class="fld full artbox"><b>Arte promocional do anúncio</b>
+        <div class="pf-cols"><label class="fld">Layout da arte<select class="in" id="f_lay"></select></label><label class="fld" id="f_fmt_r" hidden>Formato<select class="in" id="f_fmt">${ART_FMT.map(([k, t]) => `<option value="${k}">${t}</option>`).join('')}</select></label></div>
+        <span class="help">Escolha um layout e a arte é criada sozinha com a foto, o nome e o preço deste anúncio, e vira a imagem principal. Para criar ou alterar layouts, use Adm → Criação de layouts. A arte usa a primeira foto que não seja arte.</span>
+        <div><button class="btn btn-sm" type="button" id="f_artbtn" style="margin-top:8px">Pré-visualizar arte</button> <span id="f_artst" class="help"></span></div><img id="f_artimg" alt="Prévia da arte" hidden style="max-width:240px;border-radius:12px;margin-top:8px;border:1px solid var(--line2)"></div>
       <div class="fld full">Fotos (a primeira é a principal)<div class="photos" id="f_ph"></div>
         <input type="file" id="f_file" accept="image/jpeg,image/png,image/webp" multiple hidden><div><button class="btn btn-sm" type="button" id="f_add" style="margin-top:8px">+ Adicionar fotos</button> <span id="f_up" class="help"></span></div></div>
       <div class="fld full formerr" id="f_err" role="alert" style="text-align:left"></div></div></div>
@@ -229,13 +262,14 @@
         selo: pc.selo ? { texto: pc.selo, cor: E('f_scor').value === '#39ff14' ? '' : E('f_scor').value, estilo: E('f_sest').value } : null, estoque: est, disponivel: svc || est > 0, fotoPrincipal: PF.photos[0] ? PF.photos[0].url : '' });
     }
     function drawPhotos() {
-      E('f_ph').innerHTML = PF.photos.map((f, i) => `<div class="ph ${i === 0 ? 'main' : ''}" data-i="${i}"><img src="${esc(SZ.thumb(f.url, 200))}" alt="Foto ${i + 1}">${i === 0 ? '<span class="tag">PRINCIPAL</span>' : ''}<div class="tools"><button type="button" data-a="star" title="Tornar principal" aria-label="Tornar principal">★</button><button type="button" data-a="l" aria-label="Mover para a esquerda">◀</button><button type="button" data-a="r" aria-label="Mover para a direita">▶</button><button type="button" data-a="x" aria-label="Remover">✕</button></div></div>`).join('') || '<span class="help">Nenhuma foto. Adicione pelo menos uma para publicar.</span>';
+      E('f_ph').innerHTML = PF.photos.map((f, i) => `<div class="ph ${i === 0 ? 'main' : ''}" data-i="${i}"><img src="${esc(SZ.thumb(f.url, 200))}" alt="Foto ${i + 1}">${f.art ? '<span class="tag">ARTE</span>' : i === 0 ? '<span class="tag">PRINCIPAL</span>' : ''}${f.art ? '<div class="tools"><span class="help" style="padding:6px">gerada pelo layout</span></div>' : '<div class="tools"><button type="button" data-a="star" title="Tornar principal" aria-label="Tornar principal">★</button><button type="button" data-a="l" aria-label="Mover para a esquerda">◀</button><button type="button" data-a="r" aria-label="Mover para a direita">▶</button><button type="button" data-a="x" aria-label="Remover">✕</button></div>'}</div>`).join('') || '<span class="help">Nenhuma foto. Adicione pelo menos uma para publicar.</span>';
       preview();
     }
     E('f_ph').onclick = async ev => {
-      const b = ev.target.closest('[data-a]'); if (!b) return; const i = +b.closest('.ph').dataset.i, a = b.dataset.a, L = PF.photos;
-      if (a === 'star' && i > 0) L.unshift(L.splice(i, 1)[0]);
-      if (a === 'l' && i > 0) [L[i - 1], L[i]] = [L[i], L[i - 1]];
+      const b = ev.target.closest('[data-a]'); if (!b) return; const i = +b.closest('.ph').dataset.i, a = b.dataset.a, L = PF.photos; if (L[i] && L[i].art) return;
+      const ai = L.findIndex(f => f.art), lo = ai === 0 ? 1 : 0;
+      if (a === 'star' && i > lo) L.splice(lo, 0, L.splice(i, 1)[0]);
+      if (a === 'l' && i > lo) [L[i - 1], L[i]] = [L[i], L[i - 1]];
       if (a === 'r' && i < L.length - 1) [L[i + 1], L[i]] = [L[i], L[i + 1]];
       if (a === 'x') { const f = L.splice(i, 1)[0]; if (f.fresh && f.fileId) api('deleteImage', { fileId: f.fileId }).catch(() => {}); }
       drawPhotos();
@@ -249,12 +283,47 @@
         try {
           if (!/^image\/(jpeg|png|webp)$/.test(f.type)) throw new Error(`${f.name}: use JPG, PNG ou WEBP.`);
           const b64 = await resizeImage(f, 1600), r = await api('uploadImage', { mimeType: 'image/jpeg', base64: b64 });
-          PF.photos.push({ url: r.url, fresh: true, fileId: r.fileId }); drawPhotos();
+          PF.photos.push({ url: r.url, fresh: true, fileId: r.fileId, local: 'data:image/jpeg;base64,' + b64 }); drawPhotos();
         } catch (e) { fail(e); }
       }
       up.textContent = '';
     };
     m.el.addEventListener('input', preview); m.el.addEventListener('change', preview); drawPhotos();
+
+    /* ----- arte promocional ----- */
+    const layOpts = () => `<option value="">Sem arte — usar apenas as fotos</option><optgroup label="Layouts padrão">${BUILTIN.map(([k, t]) => `<option value="b:${k}">${t}</option>`).join('')}</optgroup>${CLOUD_LAY.length ? `<optgroup label="Meus layouts">${CLOUD_LAY.map(c => `<option value="c:${esc(c.id)}">${esc(c.nome)}${c.formato ? ' · ' + esc(c.formato) : ''}</option>`).join('')}</optgroup>` : ''}`;
+    let layInit = v.layoutArte || '';
+    const [lb, lk, lf] = String(layInit).split(':');
+    E('f_lay').innerHTML = layOpts(); E('f_lay').value = layInit && layInit.startsWith('b:') ? 'b:' + lk : layInit; if (lb === 'b' && lf) E('f_fmt').value = lf;
+    const layFmt = () => { E('f_fmt_r').hidden = !E('f_lay').value.startsWith('b:'); };
+    api('listLayouts').then(l => { CLOUD_LAY = Array.isArray(l) ? l : []; const cur = E('f_lay').value; E('f_lay').innerHTML = layOpts(); E('f_lay').value = cur; if (layInit.startsWith('c:') && !cur) E('f_lay').value = layInit; layFmt(); }).catch(() => { /* só padrão */ });
+    layFmt();
+    const layVal = () => { const x = E('f_lay').value; return x.startsWith('b:') ? x + ':' + E('f_fmt').value : x; };
+    const artProduct = () => { const s = selo(), n = SZ.money(E('f_pn').value), pr = SZ.money(E('f_pp').value); return { nome: E('f_nome').value.trim() || 'Produto', categoria: E('f_cat').value, marca: E('f_marca').value, modelo: E('f_modelo').value, descricaoCurta: E('f_dc').value,
+      precoNormal: isNaN(n) ? null : n, precoPromocional: isNaN(pr) ? null : pr, condicao: E('f_cond').value, conservacao: E('f_cons').value, especificacoes: parseSpecs(E('f_esp').value), seloModo: s.modo, seloManual: s.texto || '' }; };
+    function artConfig(sel) {
+      if (sel.startsWith('b:')) { const [, id, fm] = sel.split(':'); return { builtin: id, fmt: fm || 'portrait' }; }
+      const c = CLOUD_LAY.find(x => 'c:' + x.id === sel); if (!c || !c.configuracao || !c.configuracao.els) throw new Error('Layout não encontrado. Escolha outro layout.');
+      return c.configuracao;
+    }
+    /** Gera a arte (ou reaproveita a última igual). Devolve um data URL JPEG. */
+    async function makeArt() {
+      const sel = layVal(), src = PF.photos.find(f => !f.art);
+      if (!src) throw new Error('Adicione a foto do produto: a arte é montada sobre ela.');
+      const prod = artProduct(), photo = src.local || src.url, sig = JSON.stringify([sel, prod, src.url, CLOUD_LAY.length]);
+      if (PF.art && PF.art.sig === sig) return PF.art.dataUrl;
+      const dataUrl = await Art.render(artConfig(E('f_lay').value.startsWith('b:') ? sel : E('f_lay').value), prod, photo);
+      PF.art = { sig, dataUrl }; return dataUrl;
+    }
+    E('f_lay').onchange = () => { layFmt(); PF.art = null; E('f_artimg').hidden = true; E('f_artst').textContent = ''; };
+    E('f_fmt').onchange = () => { PF.art = null; E('f_artimg').hidden = true; };
+    E('f_artbtn').onclick = async () => {
+      if (!E('f_lay').value) { E('f_artst').textContent = 'Escolha um layout primeiro.'; return; }
+      const b = E('f_artbtn'); b.disabled = true; E('f_artst').innerHTML = '<span class="spin"></span> Gerando arte…';
+      try { const u = await makeArt(); E('f_artimg').src = u; E('f_artimg').hidden = false; E('f_artst').textContent = 'Pronta. Ela é enviada ao salvar o anúncio.'; }
+      catch (e) { E('f_artst').textContent = e.message || 'Não foi possível gerar a arte.'; }
+      b.disabled = false;
+    };
 
     function validate(d) {
       const er = [], svc = d.categoria === SZ.SERVICE_CAT;
@@ -266,6 +335,7 @@
       if (!svc && (d.estoque === '' || !(Number(d.estoque) >= 0) || Math.floor(Number(d.estoque)) !== Number(d.estoque))) er.push('Informe o estoque (número inteiro, 0 ou mais).');
       if (d.seloModo === 'manual' && !d.seloManual) er.push('Digite o texto do selo personalizado.');
       if (d.status === 'Publicado' && !PF.photos.length) er.push('Adicione ao menos uma foto para publicar.');
+      if (E('f_lay').value && !PF.photos.some(f => !f.art)) er.push('Para gerar a arte, adicione a foto do produto.');
       return er;
     }
     E('f_save').onclick = async () => {
@@ -277,8 +347,20 @@
       const er = validate(d), box = E('f_err'); box.innerHTML = er.map(x => '• ' + esc(x)).join('<br>');
       if (er.length) { box.scrollIntoView({ block: 'nearest' }); return; }
       const b = E('f_save'); b.disabled = true; b.textContent = 'Salvando…';
-      try { const r = await api('saveProduct', d); SZ.sessionBust(); SZ.toast(isNew ? `Anúncio criado (${r.id}).` : 'Anúncio atualizado.'); m.close(); done(); }
-      catch (e) { box.textContent = e.message; b.disabled = false; b.textContent = 'Salvar anúncio'; }
+      try {
+        const old = PF.photos.find(f => f.art), keep = PF.photos.filter(f => !f.art), sel = E('f_lay').value;
+        if (sel) {
+          b.textContent = 'Gerando arte…'; const u = await makeArt(); b.textContent = 'Enviando arte…';
+          const up = await api('uploadImage', { mimeType: 'image/jpeg', base64: u.split(',')[1] });
+          PF.photos = [{ url: up.url, fresh: true, fileId: up.fileId, art: true }].concat(keep); PF.art = null;
+          if (old) PF.trash.push(old.url);
+          d.layoutArte = layVal(); d.fotoArte = up.url;
+        } else { PF.photos = keep; if (old) PF.trash.push(old.url); d.layoutArte = ''; d.fotoArte = ''; }
+        d.fotoPrincipal = PF.photos[0] ? PF.photos[0].url : ''; d.fotosAdicionais = PF.photos.slice(1).map(f => f.url);
+        b.textContent = 'Salvando…';
+        const r = await api('saveProduct', d);
+        PF.trash.forEach(u => { const id = driveId(u); if (id) api('deleteImage', { fileId: id }).catch(() => {}); }); PF.trash = []; SZ.sessionBust(); SZ.toast(isNew ? `Anúncio criado (${r.id}).` : 'Anúncio atualizado.'); m.close(); done(); }
+      catch (e) { box.textContent = e.message || 'Erro ao salvar.'; b.disabled = false; b.textContent = 'Salvar anúncio'; }
     };
     if (!isNew) E('f_del').onclick = async () => {
       if (!confirm(`Excluir o anúncio “${p.nome}”?\n\nEle sai do site e do painel. Vendas e layouts antigos continuam registrados.`)) return;
