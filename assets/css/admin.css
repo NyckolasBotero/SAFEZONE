@@ -77,8 +77,6 @@ dialog.dlg::backdrop{background:rgba(0,0,0,.7);backdrop-filter:blur(3px)}
 .prev h3{margin:0 0 8px;font-size:13px;letter-spacing:.1em;text-transform:uppercase;color:var(--mute)}
 .edframe{width:100%;height:calc(100vh - 150px);min-height:560px;border:1px solid var(--line2);border-radius:var(--r);background:#080A08}
 .chkg{display:flex;gap:16px;flex-wrap:wrap}
-.spin{display:inline-block;width:16px;height:16px;border:2px solid var(--line2);border-top-color:var(--neon);border-radius:50%;animation:sp .8s linear infinite;vertical-align:middle}
-@keyframes sp{to{transform:rotate(360deg)}}
 .topm{display:none}
 @media (max-width:900px){
   .shell{grid-template-columns:1fr}

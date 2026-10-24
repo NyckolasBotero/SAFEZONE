@@ -8,7 +8,17 @@
   class ApiError extends Error { constructor(code, msg) { super(msg); this.code = code; } }
   SZ.ApiError = ApiError;
 
+  /* barra de progresso no topo: aparece enquanto houver chamadas em andamento */
+  let pend = 0, barEl = null;
+  function bar(on) {
+    if (!barEl) { barEl = document.createElement('div'); barEl.id = 'szbar'; barEl.setAttribute('role', 'progressbar'); barEl.setAttribute('aria-label', 'Carregando'); barEl.innerHTML = '<i></i>'; document.body.appendChild(barEl); }
+    barEl.classList.toggle('on', on);
+  }
   SZ.call = async function (action, data, token) {
+    pend++; if (document.body) bar(true);
+    try { return await rawCall(action, data, token); } finally { pend--; if (!pend && barEl) bar(false); }
+  };
+  async function rawCall(action, data, token) {
     const url = C.proxyUrl || C.apiUrl;
     let res;
     try {
@@ -18,7 +28,7 @@
     try { j = await res.json(); } catch (e) { throw new ApiError('BAD_RESPONSE', 'Resposta inesperada do servidor. Tente novamente em instantes.'); }
     if (!j || !j.ok) throw new ApiError((j && j.error && j.error.code) || 'ERROR', (j && j.error && j.error.message) || 'Erro inesperado.');
     return j.data;
-  };
+  }
 
   const cacheGet = (k, ttl) => { try { const o = JSON.parse(sessionStorage.getItem(k) || 'null'); if (o && Date.now() - o.t < ttl) return o.v; } catch (e) { /* sem cache */ } return null; };
   const cacheSet = (k, v) => { try { sessionStorage.setItem(k, JSON.stringify({ t: Date.now(), v })); } catch (e) { /* sem cache */ } };
@@ -31,7 +41,25 @@
     const c = cacheGet('sz_products', 60000); const hit = c && c.find(p => p.id === id); if (hit) return hit;
     return SZ.call('getProduct', { id });
   };
-  const DEFAULT_SETTINGS = { NomeLoja: 'Safezone', TelefoneComercial: C.whatsapp, Instagram: '@' + C.instagram, AvisoNFe: 'A Safezone não emite Nota Fiscal Eletrônica (NF-e).' };
+  const DEFAULT_SETTINGS = { NomeLoja: 'Safezone', TelefoneComercial: C.whatsapp, Instagram: '@' + C.instagram, AvisoNFe: 'A Safezone não emite Nota Fiscal Eletrônica (NF-e).', TelefoneProdutos: '', TelefoneServicos: '', CanalOfertas: 'https://whatsapp.com/channel/0029Vb8cMtg6LwHpBszDvc13' };
+  SZ.defaultSettings = DEFAULT_SETTINGS;
+  /** Números de atendimento por tipo; o que estiver vazio usa o número geral. */
+  SZ.phones = S => { const g = (S && S.TelefoneComercial) || C.whatsapp; return { geral: g, produtos: (S && S.TelefoneProdutos) || g, servicos: (S && S.TelefoneServicos) || g }; };
+  /** Mostra o que já está salvo no aparelho na hora e atualiza em segundo plano (só avisa se mudou). */
+  const lsGet = k => { try { const o = JSON.parse(localStorage.getItem(k) || 'null'); return o && o.v !== undefined ? o : null; } catch (e) { return null; } };
+  const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify({ t: Date.now(), v })); } catch (e) { /* sem cache */ } };
+  SZ.swr = function (key, fetcher, onData) {
+    const c = lsGet('sz2_' + key); let shown = null;
+    if (c) { shown = JSON.stringify(c.v); onData(c.v, true); }
+    return fetcher().then(v => { lsSet('sz2_' + key, v); if (JSON.stringify(v) !== shown) onData(v, false); return v; })
+      .catch(e => { if (!c) throw e; return c.v; });
+  };
+  SZ.productSWR = function (id, onData) {
+    const l = lsGet('sz2_products'), hit = l && Array.isArray(l.v) ? l.v.find(p => p.id === id) : null;
+    if (hit) onData(hit, true);
+    return SZ.call('getProduct', { id }).then(v => { if (!hit || JSON.stringify(v) !== JSON.stringify(hit)) onData(v, false); })
+      .catch(e => { if (!hit || e.code === 'NOT_FOUND') throw e; });
+  };
   SZ.settings = async function () {
     const c = cacheGet('sz_settings', 300000); if (c) return Object.assign({}, DEFAULT_SETTINGS, c);
     try { const v = await SZ.call('getSettings'); cacheSet('sz_settings', v); return Object.assign({}, DEFAULT_SETTINGS, v); }
@@ -124,7 +152,7 @@
         ${SZ.priceHtml(p)}
         <div class="card-stock">${p.disponivel ? (svc ? 'Disponível sob agendamento' : (p.estoque <= 3 ? `Últimas ${p.estoque} un.` : 'Em estoque')) : 'Esgotado'}</div>
         <div class="card-actions">
-          ${p.disponivel ? `<a class="btn btn-pri" data-interest="${SZ.esc(p.id)}" href="${SZ.waUrl(SZ.waProductText(p), opts.phone)}" target="_blank" rel="noopener">${SZ.icon('wa', 18)} Tenho interesse</a>` : `<span class="btn btn-ghost is-disabled">Indisponível</span>`}
+          ${p.disponivel ? `<a class="btn btn-pri" data-interest="${SZ.esc(p.id)}" href="${SZ.waUrl(SZ.waProductText(p), opts.phones ? (svc ? opts.phones.servicos : opts.phones.produtos) : opts.phone)}" target="_blank" rel="noopener">${SZ.icon('wa', 18)} Tenho interesse</a>` : `<span class="btn btn-ghost is-disabled">Indisponível</span>`}
           <a class="btn btn-ghost" href="${href}">Detalhes</a>
         </div>
       </div></article>`;

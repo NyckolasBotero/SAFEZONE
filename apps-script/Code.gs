@@ -66,6 +66,9 @@ const DEFAULT_SETTINGS = {
   PoliticaTroca: '',
   FormasPagamento: '',
   CorPrimaria: '#39FF14',
+  TelefoneProdutos: '',
+  TelefoneServicos: '',
+  CanalOfertas: 'https://whatsapp.com/channel/0029Vb8cMtg6LwHpBszDvc13',
   FaixaLimite1: '2000', FaixaPct1: '20', FaixaLimite2: '4000', FaixaPct2: '30', FaixaPct3: '35',
   _versao: '1'
 };
@@ -911,9 +914,14 @@ function saveSettings_(d, user) {
     Object.keys(vals).forEach(function (k) {
       if (!/^[A-Za-z0-9]{1,40}$/.test(k)) throw new ApiError('VALIDATION', 'Chave inválida: ' + k);
       let v = String(vals[k] == null ? '' : vals[k]).slice(0, 2000);
-      if (k === 'TelefoneComercial') {
+      if (k === 'TelefoneComercial' || k === 'TelefoneProdutos' || k === 'TelefoneServicos') {
         v = v.replace(/\D/g, '');
-        if (v.length < 12 || v.length > 13 || v.indexOf('55') !== 0) throw new ApiError('VALIDATION', 'WhatsApp inválido. Use o formato 55 + DDD + número (ex.: 5561994377971).');
+        const opcional = k !== 'TelefoneComercial' && v === '';
+        if (!opcional && (v.length < 12 || v.length > 13 || v.indexOf('55') !== 0)) throw new ApiError('VALIDATION', 'WhatsApp inválido. Use o formato 55 + DDD + número (ex.: 5561994377971).');
+      }
+      if (k === 'CanalOfertas') {
+        v = v.trim();
+        if (v && !/^https:\/\/(www\.)?(whatsapp\.com|chat\.whatsapp\.com|wa\.me)\/[^\s"'<>]+$/.test(v)) throw new ApiError('VALIDATION', 'O link do canal deve começar com https://whatsapp.com/channel/…');
       }
       const ex = t.rows.find(function (r) { return r.Chave === k; });
       if (ex) writeRow_(t, ex._row, { Valor: v }); else appendRow_(t, { Chave: k, Valor: v });
@@ -1112,3 +1120,13 @@ function audit_(user, op, record, result) {
     appendRow_(t, { IDEvento: Utilities.getUuid().slice(0, 8), Usuario: user, Operacao: op, DataHora: now_(), Registro: record, Resultado: result });
   } catch (e) { console.error('audit', e); }
 }
+
+/** Opcional: mantém o Apps Script "aquecido" para o site responder mais rápido. Rode uma vez; cria um gatilho a cada 5 minutos. */
+function ativarAquecimento() {
+  ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'aquecer_') ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger('aquecer_').timeBased().everyMinutes(5).create();
+}
+function desativarAquecimento() {
+  ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'aquecer_') ScriptApp.deleteTrigger(t); });
+}
+function aquecer_() { listPublicProducts_(); getSettings_(); getServicePricing_(); }

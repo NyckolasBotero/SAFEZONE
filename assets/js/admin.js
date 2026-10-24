@@ -49,7 +49,7 @@
   }
 
   /* ------------------------------ estrutura ------------------------------ */
-  const TABS = [['vendas', 'Vendas', 'box', () => can('vendas')], ['adm', 'Adm', 'shield', () => A.user.isAdmin], ['produtos', 'Produtos', 'cpu', () => can('produtos')], ['valores', 'Valores Serviços', 'board', () => can('configuracoes')], ['config', 'Configurações', 'wrench', () => can('configuracoes')]];
+  const TABS = [['vendas', 'Vendas', 'box', () => can('vendas')], ['adm', 'Adm', 'shield', () => A.user.isAdmin], ['produtos', 'Produtos', 'cpu', () => can('produtos')], ['valores', 'Valores Serviços', 'board', () => can('configuracoes')], ['contatos', 'Contatos', 'wa', () => can('configuracoes')], ['config', 'Configurações', 'wrench', () => can('configuracoes')]];
   const SUBS = [['indicadores', 'Indicadores'], ['logins', 'Logins'], ['postagem', 'Postagem de vendas'], ['layouts', 'Criação de layouts']];
   function boot() {
     const first = TABS.find(t => t[3]());
@@ -65,7 +65,7 @@
     let t = TABS.find(x => x[0] === v && x[3]()) || TABS.find(x => x[3]());
     A.view = t[0]; if (A.view === 'adm') A.sub = SUBS.some(x => x[0] === s) ? s : 'indicadores';
     renderNav(); const el = $('#view');
-    ({ vendas: salesView, adm: admView, produtos: productsView, valores: valuesView, config: settingsView }[A.view])(el);
+    ({ vendas: salesView, adm: admView, produtos: productsView, valores: valuesView, contatos: contactsView, config: settingsView }[A.view])(el);
   }
   function renderNav() {
     $('#nav').innerHTML = TABS.filter(t => t[3]()).map(t => `<button class="nv" data-go="${t[0]}" aria-current="${A.view === t[0]}">${SZ.icon(t[2], 18)} ${t[1]}</button>${t[0] === 'adm' && A.view === 'adm' ? `<div class="sub">${SUBS.map(s => `<button class="nv" data-go="adm/${s[0]}" aria-current="${A.sub === s[0]}">${s[1]}</button>`).join('')}</div>` : ''}`).join('');
@@ -82,7 +82,7 @@
     return { el: d, close };
   }
   const pillSale = s => `<span class="pill ${s === 'Venda concluída' ? 'ok' : s === 'Cancelada' ? 'bad' : s === 'Em negociação' ? 'warn' : 'mute'}">${esc(s)}</span>`;
-  const loadingHtml = '<p><span class="spin"></span> Carregando…</p>';
+  const loadingHtml = '<div class="ld" role="status" aria-live="polite"><p><span class="spin" aria-hidden="true"></span> Carregando…</p><div class="ln"></div><div class="ln"></div><div class="ln"></div></div>';
   const errHtml = (e, id) => `<div class="errbox" role="alert"><p>${esc(e.message)}</p><button class="btn" id="${id}">Tentar novamente</button></div>`;
 
   /* -------------------------------- vendas -------------------------------- */
@@ -519,18 +519,54 @@
     draw();
   }
 
+  /* ------------------------------ contatos (números de atendimento) ------------------------------ */
+  async function contactsView(el) {
+    el.innerHTML = `<h1>Contatos</h1><p class="lead">Defina para qual WhatsApp vai cada tipo de atendimento. Isso muda os botões e o rodapé do site.</p><div id="tbody">${loadingHtml}</div>`;
+    let s; try { s = await SZ.call('getSettings'); } catch (e) { $('#tbody').innerHTML = errHtml(e, 'tretry'); $('#tretry').onclick = () => contactsView(el); return; }
+    const F = [['TelefoneComercial', 'Atendimento geral *', 'Recebe tudo que não tiver número próprio abaixo e é o número do botão flutuante do site.'],
+      ['TelefoneProdutos', 'Interesse em produtos (compras)', 'Botões “Tenho interesse” dos produtos. Vazio = usa o número geral.'],
+      ['TelefoneServicos', 'Serviços e manutenção', 'Orçamento de serviços, calculadora e anúncios de serviços. Vazio = usa o número geral.']];
+    const fmt = d => { d = String(d || '').replace(/\D/g, ''); return d.length === 13 ? `+${d.slice(0, 2)} ${d.slice(2, 4)} ${d.slice(4, 9)}-${d.slice(9)}` : d ? '+' + d : ''; };
+    $('#tbody').innerHTML = `<div class="note info">Use o formato <b>55 + DDD + número</b> (ex.: 5561994377971). Pode digitar com espaços, traços ou parênteses.</div>
+      <form class="panel" id="tf" style="max-width:720px" novalidate><div class="pf-cols">
+        ${F.map(([k, t, h]) => `<label class="fld full">${t}<input class="in" name="${k}" inputmode="tel" maxlength="30" value="${esc(fmt(s[k]))}" placeholder="${k === 'TelefoneComercial' ? '55 61 99999-9999' : 'Vazio = número geral'}"><span class="help">${h}</span></label>`).join('')}
+        <label class="fld full">Canal de ofertas (Safezone Promo)<input class="in" name="CanalOfertas" maxlength="300" value="${esc(s.CanalOfertas)}" placeholder="https://whatsapp.com/channel/…"><span class="help">Link do canal do WhatsApp. Aparece na página inicial e no rodapé. Vazio = esconde.</span></label>
+        <div class="full"><div class="formerr" id="terr" role="alert" style="text-align:left"></div><button class="btn btn-pri" type="submit">Salvar contatos</button></div></div></form>
+      <section class="panel" style="max-width:720px"><h2>Como fica no site</h2><ul class="q-lines" id="tsum"></ul></section>`;
+    const f = $('#tf'), val = k => f.elements[k].value.replace(/\D/g, '');
+    const sum = () => { const g = val('TelefoneComercial'), p = val('TelefoneProdutos') || g, v = val('TelefoneServicos') || g, N = x => x ? esc(fmt(x)) : '<em>(defina o geral)</em>';
+      $('#tsum').innerHTML = `<li><span>Botão flutuante e atendimento geral</span><b>${N(g)}</b></li><li><span>Interesse em produtos</span><b>${N(p)}</b></li><li><span>Serviços, orçamento e manutenção</span><b>${N(v)}</b></li>`; };
+    f.addEventListener('input', sum); sum();
+    f.onsubmit = async ev => {
+      ev.preventDefault(); const er = $('#terr'); er.textContent = '';
+      const bad = (k, req) => { const d = val(k); return (req || d) && !(d.length >= 12 && d.length <= 13 && d.indexOf('55') === 0); };
+      if (bad('TelefoneComercial', true)) { er.textContent = 'Informe o atendimento geral no formato 55 + DDD + número.'; return; }
+      if (bad('TelefoneProdutos')) { er.textContent = 'Número de produtos inválido. Use 55 + DDD + número ou deixe vazio.'; return; }
+      if (bad('TelefoneServicos')) { er.textContent = 'Número de serviços inválido. Use 55 + DDD + número ou deixe vazio.'; return; }
+      const canal = f.elements.CanalOfertas.value.trim();
+      if (canal && !/^https:\/\/(www\.)?(whatsapp\.com|chat\.whatsapp\.com|wa\.me)\/\S+$/.test(canal)) { er.textContent = 'O link do canal deve começar com https://whatsapp.com/channel/…'; return; }
+      const b = f.querySelector('button[type=submit]'); b.disabled = true; b.textContent = 'Salvando…';
+      try {
+        await api('saveSettings', { valores: { TelefoneComercial: val('TelefoneComercial'), TelefoneProdutos: val('TelefoneProdutos'), TelefoneServicos: val('TelefoneServicos'), CanalOfertas: canal } });
+        try { localStorage.removeItem('sz2_settings'); sessionStorage.removeItem('sz_settings'); } catch (e) { /* ok */ }
+        SZ.toast('Contatos salvos. O site já usa os novos números.');
+      } catch (e) { er.textContent = e.message || 'Erro ao salvar.'; }
+      b.disabled = false; b.textContent = 'Salvar contatos';
+    };
+  }
+
   /* ------------------------------ configurações ------------------------------ */
   async function settingsView(el) {
     el.innerHTML = `<h1>Configurações</h1><p class="lead">Informações comerciais exibidas no site.</p><div id="cbody">${loadingHtml}</div>`;
     try {
       const s = await SZ.call('getSettings');
-      const F = [['NomeLoja', 'Nome da loja', 'in'], ['TelefoneComercial', 'WhatsApp que recebe as mensagens do site (55 + DDD + número, só números)', 'in'], ['Instagram', 'Instagram (@usuario)', 'in'], ['AvisoNFe', 'Aviso fiscal exibido no rodapé', 'in'],
+      const F = [['NomeLoja', 'Nome da loja', 'in'], ['Instagram', 'Instagram (@usuario)', 'in'], ['AvisoNFe', 'Aviso fiscal exibido no rodapé', 'in'],
         ['InformacoesComerciais', 'Informações comerciais', 'ta'], ['FormasPagamento', 'Formas de pagamento aceitas', 'ta'], ['PoliticaTroca', 'Política de troca e garantia', 'ta']];
       $('#cbody').innerHTML = `<div class="note info">Só publique aqui o que a Safezone realmente oferece. Campos vazios não aparecem no site.</div><form class="panel" id="cf" style="max-width:720px"><div class="pf-cols">
         ${F.map(([k, t, ty]) => `<label class="fld full">${t}${ty === 'ta' ? `<textarea class="in" name="${k}" maxlength="2000">${esc(s[k])}</textarea>` : `<input class="in" name="${k}" maxlength="200" value="${esc(s[k])}">`}</label>`).join('')}
         <div class="full"><button class="btn btn-pri" type="submit">Salvar configurações</button></div></div></form>`;
       $('#cf').onsubmit = async ev => { ev.preventDefault(); const v = {}; new FormData(ev.target).forEach((val, k) => { v[k] = val; });
-        try { await api('saveSettings', { valores: v }); try { sessionStorage.removeItem('sz_settings'); } catch (e) { /* ok */ } SZ.toast('Configurações salvas.'); } catch (e) { fail(e); } };
+        try { await api('saveSettings', { valores: v }); try { sessionStorage.removeItem('sz_settings'); localStorage.removeItem('sz2_settings'); } catch (e) { /* ok */ } SZ.toast('Configurações salvas.'); } catch (e) { fail(e); } };
     } catch (e) { $('#cbody').innerHTML = errHtml(e, 'cretry'); $('#cretry').onclick = () => settingsView(el); }
   }
 

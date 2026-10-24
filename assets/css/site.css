@@ -109,7 +109,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 .b-vidro{background:color-mix(in srgb,var(--bc) 18%,transparent);border:1px solid color-mix(in srgb,var(--bc) 55%,transparent);color:var(--bc);backdrop-filter:blur(6px)}
 @keyframes rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
-.skel{border-radius:var(--r);aspect-ratio:3/4;background:linear-gradient(100deg,#111511 30%,#1a201a 50%,#111511 70%);background-size:200% 100%;animation:sh 1.3s infinite}
+.skel{border-radius:var(--r);aspect-ratio:auto;height:var(--skh,465px);background:linear-gradient(100deg,#111511 30%,#1a201a 50%,#111511 70%);background-size:200% 100%;animation:sh 1.3s infinite}
 @keyframes sh{to{background-position:-200% 0}}
 .empty,.errbox{border:1px dashed var(--line2);border-radius:var(--r);padding:36px 20px;text-align:center;color:var(--mute);grid-column:1/-1}
 .errbox{border-color:rgba(255,123,123,.45);color:var(--err)}
@@ -222,3 +222,23 @@ button,input,select,textarea{font:inherit;color:inherit}
 .q-total b{font-size:26px;color:var(--neon)}
 .q-note{font-size:12px;color:var(--mute);margin:0}
 @media (max-width:900px){.q-grid{grid-template-columns:1fr}.q-sum{position:static}.q-fields{grid-template-columns:1fr}}
+
+/* ---------- carregamento ---------- */
+@keyframes sp{to{transform:rotate(360deg)}}
+@keyframes bar{0%{transform:translateX(-100%)}100%{transform:translateX(350%)}}
+#szbar{position:fixed;left:0;top:0;right:0;height:3px;z-index:9999;overflow:hidden;opacity:0;transition:opacity .2s;pointer-events:none}
+#szbar.on{opacity:1}
+#szbar i{display:block;width:30%;height:100%;background:linear-gradient(90deg,transparent,var(--neon),transparent);box-shadow:0 0 10px var(--neon);animation:bar 1.1s ease-in-out infinite}
+.spin{display:inline-block;width:18px;height:18px;border:3px solid var(--line2);border-top-color:var(--neon);border-radius:50%;animation:sp .8s linear infinite;vertical-align:middle}
+.ld{display:grid;gap:10px;padding:6px 0}
+.ld p{margin:0;color:var(--mute);display:flex;align-items:center;gap:10px}
+.ld .ln{height:44px;border-radius:12px;background:linear-gradient(100deg,#111511 30%,#1a201a 50%,#111511 70%);background-size:200% 100%;animation:sh 1.3s infinite}
+.sk-line{display:block;height:14px;border-radius:7px;background:linear-gradient(100deg,#111511 30%,#1a201a 50%,#111511 70%);background-size:200% 100%;animation:sh 1.3s infinite;margin:8px 0;max-width:240px}
+.promo{display:flex;align-items:center;justify-content:space-between;gap:18px;flex-wrap:wrap;border:1px solid rgba(57,255,20,.35);border-radius:18px;padding:18px 22px;background:linear-gradient(100deg,rgba(57,255,20,.1),rgba(167,139,250,.08));margin:6px 0}
+.promo h2{margin:0 0 2px;font-size:20px}.promo p{margin:0;color:var(--mute);font-size:14px}
+/* indicadores de carregamento continuam animados mesmo com "reduzir movimento" ativo (são essenciais para mostrar que não travou) */
+@media (prefers-reduced-motion:reduce){
+  .spin{animation:sp 1.2s linear infinite!important}
+  #szbar i{animation:bar 1.8s ease-in-out infinite!important}
+  .skel,.ld .ln,.sk-line{animation:sh 2.2s infinite!important}
+}
