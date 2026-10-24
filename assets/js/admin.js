@@ -49,7 +49,7 @@
   }
 
   /* ------------------------------ estrutura ------------------------------ */
-  const TABS = [['vendas', 'Vendas', 'box', () => can('vendas')], ['adm', 'Adm', 'shield', () => A.user.isAdmin], ['produtos', 'Produtos', 'cpu', () => can('produtos')], ['config', 'Configurações', 'wrench', () => can('configuracoes')]];
+  const TABS = [['vendas', 'Vendas', 'box', () => can('vendas')], ['adm', 'Adm', 'shield', () => A.user.isAdmin], ['produtos', 'Produtos', 'cpu', () => can('produtos')], ['valores', 'Valores Serviços', 'board', () => can('configuracoes')], ['config', 'Configurações', 'wrench', () => can('configuracoes')]];
   const SUBS = [['indicadores', 'Indicadores'], ['logins', 'Logins'], ['postagem', 'Postagem de vendas'], ['layouts', 'Criação de layouts']];
   function boot() {
     const first = TABS.find(t => t[3]());
@@ -65,7 +65,7 @@
     let t = TABS.find(x => x[0] === v && x[3]()) || TABS.find(x => x[3]());
     A.view = t[0]; if (A.view === 'adm') A.sub = SUBS.some(x => x[0] === s) ? s : 'indicadores';
     renderNav(); const el = $('#view');
-    ({ vendas: salesView, adm: admView, produtos: productsView, config: settingsView }[A.view])(el);
+    ({ vendas: salesView, adm: admView, produtos: productsView, valores: valuesView, config: settingsView }[A.view])(el);
   }
   function renderNav() {
     $('#nav').innerHTML = TABS.filter(t => t[3]()).map(t => `<button class="nv" data-go="${t[0]}" aria-current="${A.view === t[0]}">${SZ.icon(t[2], 18)} ${t[1]}</button>${t[0] === 'adm' && A.view === 'adm' ? `<div class="sub">${SUBS.map(s => `<button class="nv" data-go="adm/${s[0]}" aria-current="${A.sub === s[0]}">${s[1]}</button>`).join('')}</div>` : ''}`).join('');
@@ -451,12 +451,80 @@
     };
   }
 
+  /* ------------------------------ valores dos serviços ------------------------------ */
+  async function valuesView(el) {
+    el.innerHTML = `<h1>Valores Serviços</h1><p class="lead">Defina quanto cobrar por cada serviço. No site, o cliente soma os serviços e informa as peças do PC para ver o valor.</p><div id="vbody">${loadingHtml}</div>`;
+    let D;
+    try { D = await api('adminServicePricing'); } catch (e) { $('#vbody').innerHTML = errHtml(e, 'vretry'); $('#vretry').onclick = () => valuesView(el); return; }
+    const TYPES = [['GPU', 'Placas de vídeo'], ['CPU', 'Processadores'], ['RAM', 'Memória RAM'], ['Placa-mae', 'Placas-mãe']];
+    const MODES = [['percentual', '% do valor do PC'], ['classe', 'Valor por classe (Low / Mid / High)'], ['unico', 'Valor único']];
+    const S = { tipo: 'GPU', q: '' }; let fx = D.faixas; const f2 = v => v == null ? '' : String(v).replace('.', ',');
+    D.servicos.forEach(x => { x._k = Math.random(); });
+    const svcRow = (x, i) => `<tr data-i="${i}"><td data-l="Serviço"><input class="in" data-f="nome" maxlength="80" value="${esc(x.nome)}" aria-label="Nome do serviço"></td>
+      <td data-l="Como cobrar"><select class="in" data-f="modo" aria-label="Como cobrar">${MODES.map(([k, t]) => `<option value="${k}" ${x.modo === k ? 'selected' : ''}>${t}</option>`).join('')}</select></td>
+      <td data-l="Valores">${x.modo === 'unico' ? `<label class="vl">Valor (R$)<input class="in" data-f="precoUnico" inputmode="decimal" value="${f2(x.precoUnico)}"></label>`
+        : x.modo === 'classe' ? `<div class="v3">${[['precoLow', 'Low end'], ['precoMid', 'Mid end'], ['precoHigh', 'High end']].map(([k, t]) => `<label class="vl">${t} (R$)<input class="in" data-f="${k}" inputmode="decimal" value="${f2(x[k])}"></label>`).join('')}</div>`
+        : `<label class="vl">Parte do percentual (%)<input class="in" data-f="parte" inputmode="decimal" value="${f2(x.parte == null ? 100 : x.parte)}"></label>`}</td>
+      <td data-l="Ativo"><label class="chk"><input type="checkbox" data-f="ativo" ${x.ativo !== false ? 'checked' : ''}> No site</label></td><td><button class="btn btn-sm" data-del="1" type="button">Remover</button></td></tr>`;
+    function draw() {
+      const rows = D.componentes.map((c, i) => [c, i]).filter(([c]) => c.tipo === S.tipo && (!S.q || nn(c.nome + ' ' + c.marca).indexOf(nn(S.q)) >= 0));
+      $('#vbody').innerHTML = `<div class="note info">Deixe um valor vazio para aparecer <b>“a combinar”</b> no site. Nada é inventado: o que você não preencher não é cobrado.</div>
+      <section class="panel"><h2>1. Percentual sobre o valor do PC</h2><p class="q-help" style="margin:0 0 12px">Somando o preço de mercado das peças que o cliente informar, o serviço cobrado por <b>% do valor do PC</b> segue estas faixas.</p>
+        <div class="pf-cols" id="vfx"><label class="fld">Até (R$)<input class="in" data-x="limite1" inputmode="decimal" value="${f2(fx.limite1)}"></label><label class="fld">cobra (%)<input class="in" data-x="pct1" inputmode="decimal" value="${f2(fx.pct1)}"></label>
+        <label class="fld">Até (R$)<input class="in" data-x="limite2" inputmode="decimal" value="${f2(fx.limite2)}"></label><label class="fld">cobra (%)<input class="in" data-x="pct2" inputmode="decimal" value="${f2(fx.pct2)}"></label>
+        <label class="fld full">Acima disso cobra (%)<input class="in" data-x="pct3" inputmode="decimal" value="${f2(fx.pct3)}" style="max-width:200px"></label></div></section>
+      <section class="panel"><h2>2. Serviços e valores</h2><div class="tw"><table class="tbl rs" id="vsv"><thead><tr><th>Serviço</th><th>Como cobrar</th><th>Valores</th><th>Ativo</th><th></th></tr></thead><tbody>${D.servicos.map(svcRow).join('') || '<tr><td colspan="5">Nenhum serviço. Adicione abaixo.</td></tr>'}</tbody></table></div>
+        <p style="margin:12px 0 0"><button class="btn" id="vaddS" type="button">+ Adicionar serviço</button></p>
+        <p class="q-help" style="margin-top:10px"><b>% do valor do PC:</b> valor = preço das peças × percentual da faixa × “parte do percentual” (100 = o percentual inteiro). <b>Por classe:</b> o PC é Low, Mid ou High pela <b>placa de vídeo</b> (ou pelo processador, se não tiver placa dedicada).</p></section>
+      <section class="panel"><h2>3. Peças: classe e preço de mercado</h2>
+        <div class="note info">Os preços iniciais são <b>aproximados</b> (mercado brasileiro) e servem de ponto de partida. Ajuste a classe (Low, Mid ou High) e o preço de cada peça como preferir. Regra sugerida para placas de vídeo: <b>Low</b> até GTX 1080, <b>Mid</b> até RTX 3060, <b>High</b> acima.</div>
+        <div class="bar"><label class="fld"><span class="sr">Tipo</span><select class="in" id="vtp">${TYPES.map(([k, t]) => `<option value="${k}" ${k === S.tipo ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+          <label class="fld grow" style="max-width:320px"><span class="sr">Buscar</span><input class="in" id="vq" placeholder="Buscar peça…" value="${esc(S.q)}"></label><span class="grow"></span><button class="btn" id="vaddC" type="button">+ Adicionar peça</button></div>
+        <div class="tw"><table class="tbl rs" id="vcp"><thead><tr><th>Peça</th><th>Marca</th><th>Classe</th><th class="num">Preço (R$)</th><th>Ativo</th><th></th></tr></thead><tbody>
+        ${rows.map(([c, i]) => `<tr data-i="${i}"><td data-l="Peça"><input class="in" data-f="nome" maxlength="100" value="${esc(c.nome)}" aria-label="Nome da peça"></td><td data-l="Marca"><input class="in" data-f="marca" maxlength="30" value="${esc(c.marca)}" style="min-width:90px" aria-label="Marca"></td>
+        <td data-l="Classe"><select class="in" data-f="classe" aria-label="Classe">${['Low', 'Mid', 'High'].map(k => `<option ${c.classe === k ? 'selected' : ''}>${k}</option>`).join('')}</select></td>
+        <td class="num" data-l="Preço"><input class="in" data-f="preco" inputmode="decimal" value="${f2(c.preco)}" style="max-width:120px;text-align:right" aria-label="Preço"></td>
+        <td data-l="Ativo"><input type="checkbox" data-f="ativo" ${c.ativo !== false ? 'checked' : ''} aria-label="Ativo no site"></td><td><button class="btn btn-sm" data-del="1" type="button">Remover</button></td></tr>`).join('') || '<tr><td colspan="6">Nenhuma peça neste filtro.</td></tr>'}</tbody></table></div></section>
+      <div class="savebar"><span id="verr" class="formerr" role="alert" style="text-align:left"></span><button class="btn btn-pri" id="vsave" type="button">Salvar valores</button></div>`;
+      bind();
+    }
+    const num = v => { const t = String(v == null ? '' : v).trim(); return t === '' ? null : SZ.money(t); };
+    function bind() {
+      $('#vtp').onchange = ev => { S.tipo = ev.target.value; draw(); };
+      $('#vq').oninput = ev => { S.q = ev.target.value; clearTimeout(bind.t); bind.t = setTimeout(() => { draw(); const q = $('#vq'); q.focus(); q.setSelectionRange(q.value.length, q.value.length); }, 250); };
+      $('#vfx').oninput = ev => { const k = ev.target.dataset.x; if (k) fx[k] = ev.target.value; };
+      $('#vaddS').onclick = () => { D.servicos.push({ id: '', nome: 'Novo serviço', descricao: '', modo: 'unico', precoUnico: null, precoLow: null, precoMid: null, precoHigh: null, parte: 100, ativo: true }); draw(); const r = $$('#vsv tbody tr').pop(); if (r) { const i = $('input', r); i.focus(); i.select(); } };
+      $('#vaddC').onclick = () => { D.componentes.unshift({ id: '', tipo: S.tipo, marca: S.tipo === 'GPU' ? 'NVIDIA' : S.tipo === 'CPU' ? 'AMD' : 'Outro', nome: '', classe: 'Mid', preco: null, ativo: true }); S.q = ''; draw(); const r = $('#vcp tbody tr input'); if (r) r.focus(); };
+      const edit = (tbl, arr, rerender) => {
+        tbl.addEventListener('input', ev => { const tr = ev.target.closest('tr[data-i]'), f = ev.target.dataset.f; if (!tr || !f || ev.target.type === 'checkbox') return; arr[+tr.dataset.i][f] = ev.target.value; });
+        tbl.addEventListener('change', ev => { const tr = ev.target.closest('tr[data-i]'), f = ev.target.dataset.f; if (!tr || !f) return; const o = arr[+tr.dataset.i]; o[f] = ev.target.type === 'checkbox' ? ev.target.checked : ev.target.value; if (rerender && f === 'modo') draw(); });
+        tbl.addEventListener('click', ev => { const b = ev.target.closest('[data-del]'); if (!b) return; const i = +b.closest('tr').dataset.i, o = arr[i]; if (!confirm(`Remover “${o.nome || 'item'}”? A mudança só vale depois de salvar.`)) return; arr.splice(i, 1); draw(); });
+      };
+      edit($('#vsv'), D.servicos, true); edit($('#vcp'), D.componentes, false);
+      $('#vsave').onclick = save;
+    }
+    async function save() {
+      const err = $('#verr'); err.textContent = '';
+      const money = (v, l) => { const n = num(v); if (n !== null && (isNaN(n) || n < 0)) throw new Error(l + ': valor inválido.'); return n; };
+      let body;
+      try {
+        body = { faixas: { limite1: money(fx.limite1, 'Limite da 1ª faixa'), pct1: money(fx.pct1, '% da 1ª faixa'), limite2: money(fx.limite2, 'Limite da 2ª faixa'), pct2: money(fx.pct2, '% da 2ª faixa'), pct3: money(fx.pct3, '% acima') },
+          servicos: D.servicos.map(x => ({ id: x.id, nome: String(x.nome || '').trim(), descricao: x.descricao || '', modo: x.modo, precoUnico: money(x.precoUnico, x.nome), precoLow: money(x.precoLow, x.nome), precoMid: money(x.precoMid, x.nome), precoHigh: money(x.precoHigh, x.nome), parte: money(x.parte, x.nome), ativo: x.ativo !== false })),
+          componentes: D.componentes.map(c => { const pr = money(c.preco, c.nome || 'Peça'); if (pr === null) throw new Error(`Informe o preço de “${c.nome || 'peça sem nome'}”.`); return { id: c.id, tipo: c.tipo, marca: String(c.marca || '').trim(), nome: String(c.nome || '').trim(), classe: c.classe, preco: pr, ativo: c.ativo !== false }; }) };
+      } catch (e) { err.textContent = e.message; return; }
+      const b = $('#vsave'); b.disabled = true; b.textContent = 'Salvando…';
+      try { D = await api('saveServicePricing', body); fx = D.faixas; SZ.toast('Valores salvos. O site já usa os novos valores.'); draw(); }
+      catch (e) { err.textContent = e.message || 'Erro ao salvar.'; b.disabled = false; b.textContent = 'Salvar valores'; }
+    }
+    draw();
+  }
+
   /* ------------------------------ configurações ------------------------------ */
   async function settingsView(el) {
     el.innerHTML = `<h1>Configurações</h1><p class="lead">Informações comerciais exibidas no site.</p><div id="cbody">${loadingHtml}</div>`;
     try {
       const s = await SZ.call('getSettings');
-      const F = [['NomeLoja', 'Nome da loja', 'in'], ['TelefoneComercial', 'WhatsApp comercial (com DDI e DDD, só números)', 'in'], ['Instagram', 'Instagram (@usuario)', 'in'], ['AvisoNFe', 'Aviso fiscal exibido no rodapé', 'in'],
+      const F = [['NomeLoja', 'Nome da loja', 'in'], ['TelefoneComercial', 'WhatsApp que recebe as mensagens do site (55 + DDD + número, só números)', 'in'], ['Instagram', 'Instagram (@usuario)', 'in'], ['AvisoNFe', 'Aviso fiscal exibido no rodapé', 'in'],
         ['InformacoesComerciais', 'Informações comerciais', 'ta'], ['FormasPagamento', 'Formas de pagamento aceitas', 'ta'], ['PoliticaTroca', 'Política de troca e garantia', 'ta']];
       $('#cbody').innerHTML = `<div class="note info">Só publique aqui o que a Safezone realmente oferece. Campos vazios não aparecem no site.</div><form class="panel" id="cf" style="max-width:720px"><div class="pf-cols">
         ${F.map(([k, t, ty]) => `<label class="fld full">${t}${ty === 'ta' ? `<textarea class="in" name="${k}" maxlength="2000">${esc(s[k])}</textarea>` : `<input class="in" name="${k}" maxlength="200" value="${esc(s[k])}">`}</label>`).join('')}

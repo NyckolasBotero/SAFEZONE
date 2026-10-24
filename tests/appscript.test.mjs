@@ -72,3 +72,41 @@ test('cadastro, validação, catálogo público, interesse e dashboard', () => {
   assert.ok(e.sheets.Anuncios.rows[3][1].startsWith("'="));                // proteção de fórmula
   assert.equal(e.call('saveUser', { login: 'dono@safezone.com', acesso: 'Vendas', status: 'Ativo' }, t).error.code, 'VALIDATION'); // não remove o último admin
 });
+
+test('valores de serviços: base inicial, leitura pública, salvar e validar', () => {
+  const e = makeEnv(seed);
+  const pub = e.call('getServicePricing', {});
+  assert.ok(pub.ok);
+  assert.deepEqual(pub.data.servicos.map(s => s.nome), ['Montagem de computador', 'Limpeza', 'Formatação']);
+  assert.ok(pub.data.servicos.every(s => s.precoUnico === null && s.precoLow === null), 'nenhum preço de serviço inventado');
+  assert.ok(pub.data.componentes.length > 80 && ['GPU', 'CPU', 'RAM', 'Placa-mae'].every(t => pub.data.componentes.some(c => c.tipo === t)));
+  assert.deepEqual(pub.data.faixas, { limite1: 2000, pct1: 20, limite2: 4000, pct2: 30, pct3: 35 });
+  const gtx = pub.data.componentes.find(c => c.nome.includes('GTX 1080 8GB')), r3060 = pub.data.componentes.find(c => c.nome.includes('RTX 3060 12GB')), r3060ti = pub.data.componentes.find(c => c.nome.includes('RTX 3060 Ti'));
+  assert.deepEqual([gtx.classe, r3060.classe, r3060ti.classe], ['Low', 'Mid', 'High']);
+  // permissões: só quem tem Configurações edita
+  const dono = e.call('login', { login: 'dono@safezone.com', password: 'SenhaForte123' }).data.token;
+  const vend = e.call('login', { login: 'vendas@safezone.com', password: 'Outra12345' }).data.token;
+  assert.equal(e.call('saveServicePricing', {}, vend).error.code, 'FORBIDDEN');
+  assert.equal(e.call('adminServicePricing', {}, vend).error.code, 'FORBIDDEN');
+  const adm = e.call('adminServicePricing', {}, dono).data;
+  // salvar alterações
+  const sv = adm.servicos.map(s => s.nome === 'Limpeza' ? { ...s, precoLow: 60, precoMid: 80, precoHigh: '100,50' } : s);
+  const cp = adm.componentes.concat([{ tipo: 'GPU', marca: 'AMD', nome: '=HYPERLINK("x")', classe: 'Mid', preco: 999 }]);
+  const ok = e.call('saveServicePricing', { servicos: sv, componentes: cp, faixas: { limite1: 2500, pct1: 18, limite2: 5000, pct2: 28, pct3: 33 } }, dono);
+  assert.ok(ok.ok, JSON.stringify(ok));
+  const after = e.call('getServicePricing', {}).data;
+  const l = after.servicos.find(s => s.nome === 'Limpeza');
+  assert.deepEqual([l.precoLow, l.precoMid, l.precoHigh], [60, 80, 100.5]);
+  assert.equal(after.componentes.length, adm.componentes.length + 1);
+  assert.equal(after.componentes.find(c => c.nome.includes('HYPERLINK')).nome, '=HYPERLINK("x")'); // sem fórmula na planilha, texto íntegro na leitura
+  assert.equal(after.faixas.limite1, 2500);
+  // validações
+  const bad = (patch, msg) => { const r = e.call('saveServicePricing', { servicos: sv, componentes: cp.slice(0, 3), faixas: { limite1: 2000, pct1: 20, limite2: 4000, pct2: 30, pct3: 35 }, ...patch }, dono); assert.equal(r.ok, false, msg); };
+  bad({ faixas: { limite1: 4000, pct1: 20, limite2: 2000, pct2: 30, pct3: 35 } }, 'limites invertidos');
+  bad({ faixas: { limite1: 2000, pct1: 120, limite2: 4000, pct2: 30, pct3: 35 } }, 'pct > 100');
+  bad({ componentes: [{ tipo: 'GPU', nome: 'X Placa', classe: 'Ultra', preco: 10 }] }, 'classe inválida');
+  bad({ servicos: [{ nome: 'A' }] }, 'nome curto');
+  // número do WhatsApp
+  assert.equal(e.call('saveSettings', { valores: { TelefoneComercial: '123' } }, dono).ok, false);
+  assert.equal(e.call('saveSettings', { valores: { TelefoneComercial: '+55 (61) 99999-1234' } }, dono).data.TelefoneComercial, '5561999991234');
+});

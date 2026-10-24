@@ -13,7 +13,7 @@ export function makeEnv(seed) {
       getValues: () => { const o = []; for (let i = 0; i < nr; i++) { const row = []; for (let j = 0; j < nc; j++) row.push((s.rows[r - 1 + i] || [])[c - 1 + j] ?? ''); o.push(row); } return o; },
       setValues: (v) => { v.forEach((row, i) => { s.rows[r - 1 + i] = s.rows[r - 1 + i] || []; row.forEach((x, j) => { s.rows[r - 1 + i][c - 1 + j] = x; }); }); },
       setFontWeight() {} }),
-    appendRow: (row) => { s.rows.push(row.slice()); }, deleteRow: (n) => { s.rows.splice(n - 1, 1); },
+    appendRow: (row) => { s.rows.push(row.slice()); }, deleteRow: (n) => { s.rows.splice(n - 1, 1); }, deleteRows: (n, k) => { s.rows.splice(n - 1, k); }, getMaxRows: () => 1e6, insertRowsAfter() {},
     setFrozenRows() {}, setName: (n) => { s.name = n; sheets[n] = s; } }; sheets[name] = s; return s; };
   mk('Permissionamento', seed);
   const store = {}; const cacheMk = () => ({ get: k => store[k] ?? null, put: (k, v) => { store[k] = v; }, remove: k => { delete store[k]; } });

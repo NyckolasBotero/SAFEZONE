@@ -51,6 +51,8 @@ const SHEETS = {
   Vendas: ['IDVenda', 'Data', 'IDAnuncio', 'NomeProduto', 'Quantidade', 'ValorUnitario', 'ValorTotal',
     'Status', 'Origem', 'Observacoes', 'DataAtualizacao'],
   Layouts: ['IDLayout', 'Nome', 'Formato', 'Configuracao', 'DataCriacao', 'DataAtualizacao', 'CriadoPor'],
+  Servicos: ['IDServico', 'Nome', 'Descricao', 'Modo', 'PrecoUnico', 'PrecoLow', 'PrecoMid', 'PrecoHigh', 'ParteDoPercentual', 'Ordem', 'Ativo'],
+  Componentes: ['IDComponente', 'Tipo', 'Marca', 'Nome', 'Classe', 'PrecoEstimado', 'Ativo'],
   Configuracoes: ['Chave', 'Valor'],
   Auditoria: ['IDEvento', 'Usuario', 'Operacao', 'DataHora', 'Registro', 'Resultado']
 };
@@ -64,6 +66,7 @@ const DEFAULT_SETTINGS = {
   PoliticaTroca: '',
   FormasPagamento: '',
   CorPrimaria: '#39FF14',
+  FaixaLimite1: '2000', FaixaPct1: '20', FaixaLimite2: '4000', FaixaPct2: '30', FaixaPct3: '35',
   _versao: '1'
 };
 
@@ -128,6 +131,7 @@ const ROUTES = {
   getProduct:      { auth: null,       fn: getPublicProduct_ },
   getSettings:     { auth: null,       fn: getSettings_ },
   registerInterest:{ auth: null,       fn: registerInterest_, write: true },
+  getServicePricing:{ auth: null,      fn: getServicePricing_ },
   // sessão
   login:           { auth: null,       fn: login_ },
   logout:          { auth: 'any',      fn: logout_ },
@@ -145,6 +149,8 @@ const ROUTES = {
   updateSale:      { auth: 'vendas',   fn: updateSale_, write: true },
   // configurações
   saveSettings:    { auth: 'config',   fn: saveSettings_, write: true },
+  adminServicePricing:{ auth: 'config', fn: adminServicePricing_ },
+  saveServicePricing:{ auth: 'config', fn: saveServicePricing_, write: true },
   // aba Adm
   dashboard:       { auth: 'adm',      fn: dashboard_ },
   listUsers:       { auth: 'adm',      fn: listUsers_ },
@@ -171,6 +177,7 @@ function setup() {
     });
   }
   Object.keys(SHEETS).forEach(function (name) { ensureSheet_(ss, name, SHEETS[name]); });
+  seedPricing_();
 
   // status/datas padrão para usuários já existentes
   const t = table_('Permissionamento');
@@ -903,7 +910,11 @@ function saveSettings_(d, user) {
     const vals = d.valores || {};
     Object.keys(vals).forEach(function (k) {
       if (!/^[A-Za-z0-9]{1,40}$/.test(k)) throw new ApiError('VALIDATION', 'Chave inválida: ' + k);
-      const v = String(vals[k] == null ? '' : vals[k]).slice(0, 2000);
+      let v = String(vals[k] == null ? '' : vals[k]).slice(0, 2000);
+      if (k === 'TelefoneComercial') {
+        v = v.replace(/\D/g, '');
+        if (v.length < 12 || v.length > 13 || v.indexOf('55') !== 0) throw new ApiError('VALIDATION', 'WhatsApp inválido. Use o formato 55 + DDD + número (ex.: 5561994377971).');
+      }
       const ex = t.rows.find(function (r) { return r.Chave === k; });
       if (ex) writeRow_(t, ex._row, { Valor: v }); else appendRow_(t, { Chave: k, Valor: v });
     });
@@ -911,6 +922,120 @@ function saveSettings_(d, user) {
     return getSettings_();
   });
 }
+
+/* ====================== SERVIÇOS · ORÇAMENTO POR CONFIGURAÇÃO ====================== */
+
+const PRICING_MODES = ['unico', 'classe', 'percentual'];
+const COMP_TYPES = ['GPU', 'CPU', 'RAM', 'Placa-mae'];
+const COMP_CLASSES = ['Low', 'Mid', 'High'];
+
+/** Base inicial APROXIMADA de peças (R$, mercado BR). Serve de ponto de partida: revise na aba "Valores Serviços". */
+const SEED_COMPONENTS = [["GPU","NVIDIA","GeForce GT 710 2GB","Low",250],["GPU","NVIDIA","GeForce GT 1030 2GB","Low",450],["GPU","NVIDIA","GeForce GTX 1050 Ti 4GB","Low",550],["GPU","NVIDIA","GeForce GTX 1060 6GB","Low",700],["GPU","NVIDIA","GeForce GTX 1070 8GB","Low",900],["GPU","NVIDIA","GeForce GTX 1080 8GB","Low",1100],["GPU","NVIDIA","GeForce GTX 1650 4GB","Low",900],["GPU","NVIDIA","GeForce GTX 1660 Super 6GB","Low",1200],["GPU","NVIDIA","GeForce GTX 1660 Ti 6GB","Low",1300],["GPU","AMD","Radeon RX 550 4GB","Low",350],["GPU","AMD","Radeon RX 570 4GB","Low",450],["GPU","AMD","Radeon RX 580 8GB","Low",600],["GPU","AMD","Radeon RX 5500 XT 8GB","Low",800],["GPU","NVIDIA","GeForce RTX 2060 6GB","Mid",1400],["GPU","NVIDIA","GeForce RTX 2060 Super 8GB","Mid",1700],["GPU","NVIDIA","GeForce RTX 2070 Super 8GB","Mid",1900],["GPU","NVIDIA","GeForce RTX 3050 6GB","Mid",1100],["GPU","NVIDIA","GeForce RTX 3050 8GB","Mid",1400],["GPU","NVIDIA","GeForce RTX 3060 12GB","Mid",1700],["GPU","AMD","Radeon RX 5600 XT 6GB","Mid",1000],["GPU","AMD","Radeon RX 5700 XT 8GB","Mid",1300],["GPU","AMD","Radeon RX 6600 8GB","Mid",1400],["GPU","Intel","Intel Arc A750 8GB","Mid",1300],["GPU","NVIDIA","GeForce RTX 2080 Super 8GB","High",2000],["GPU","NVIDIA","GeForce RTX 3060 Ti 8GB","High",2100],["GPU","NVIDIA","GeForce RTX 3070 8GB","High",2400],["GPU","NVIDIA","GeForce RTX 3070 Ti 8GB","High",2700],["GPU","NVIDIA","GeForce RTX 3080 10GB","High",3300],["GPU","NVIDIA","GeForce RTX 4060 8GB","High",1900],["GPU","NVIDIA","GeForce RTX 4060 Ti 8GB","High",2800],["GPU","NVIDIA","GeForce RTX 4070 12GB","High",3900],["GPU","NVIDIA","GeForce RTX 4070 Super 12GB","High",4400],["GPU","NVIDIA","GeForce RTX 4070 Ti Super 16GB","High",6200],["GPU","NVIDIA","GeForce RTX 4080 Super 16GB","High",8500],["GPU","NVIDIA","GeForce RTX 4090 24GB","High",15000],["GPU","NVIDIA","GeForce RTX 5060 8GB","High",2200],["GPU","NVIDIA","GeForce RTX 5060 Ti 16GB","High",3600],["GPU","NVIDIA","GeForce RTX 5070 12GB","High",4300],["GPU","NVIDIA","GeForce RTX 5070 Ti 16GB","High",6500],["GPU","NVIDIA","GeForce RTX 5080 16GB","High",9500],["GPU","NVIDIA","GeForce RTX 5090 32GB","High",18000],["GPU","AMD","Radeon RX 6600 XT 8GB","High",1600],["GPU","AMD","Radeon RX 6650 XT 8GB","High",1700],["GPU","AMD","Radeon RX 6700 XT 12GB","High",2200],["GPU","AMD","Radeon RX 6800 XT 16GB","High",3000],["GPU","AMD","Radeon RX 7600 8GB","High",1800],["GPU","AMD","Radeon RX 7700 XT 12GB","High",2800],["GPU","AMD","Radeon RX 7800 XT 16GB","High",3500],["GPU","AMD","Radeon RX 7900 GRE 16GB","High",4500],["GPU","AMD","Radeon RX 7900 XTX 24GB","High",7000],["GPU","AMD","Radeon RX 9060 XT 16GB","High",3000],["GPU","AMD","Radeon RX 9070 16GB","High",5500],["GPU","AMD","Radeon RX 9070 XT 16GB","High",6000],["CPU","AMD","Athlon 3000G","Low",350],["CPU","AMD","Ryzen 3 3200G","Low",500],["CPU","AMD","Ryzen 3 4100","Low",450],["CPU","AMD","Ryzen 5 3600","Mid",700],["CPU","AMD","Ryzen 5 5500","Mid",650],["CPU","AMD","Ryzen 5 5600","Mid",800],["CPU","AMD","Ryzen 5 5600G","Mid",850],["CPU","AMD","Ryzen 5 5600X","Mid",900],["CPU","AMD","Ryzen 7 5700X","High",1100],["CPU","AMD","Ryzen 7 5800X3D","High",2000],["CPU","AMD","Ryzen 5 7500F","Mid",1000],["CPU","AMD","Ryzen 5 7600","High",1200],["CPU","AMD","Ryzen 5 9600X","High",1500],["CPU","AMD","Ryzen 7 7700","High",1700],["CPU","AMD","Ryzen 7 7800X3D","High",2800],["CPU","AMD","Ryzen 7 9700X","High",2200],["CPU","AMD","Ryzen 7 9800X3D","High",3300],["CPU","AMD","Ryzen 9 7900X","High",2300],["CPU","AMD","Ryzen 9 9950X","High",4500],["CPU","Intel","Core i3-10100F","Low",450],["CPU","Intel","Core i3-12100F","Low",600],["CPU","Intel","Core i5-10400F","Low",650],["CPU","Intel","Core i5-11400F","Mid",800],["CPU","Intel","Core i5-12400F","Mid",900],["CPU","Intel","Core i5-13400F","Mid",1300],["CPU","Intel","Core i5-14400F","Mid",1400],["CPU","Intel","Core i5-14600K","High",1900],["CPU","Intel","Core i7-12700","High",1700],["CPU","Intel","Core i7-13700K","High",2300],["CPU","Intel","Core i7-14700K","High",2600],["CPU","Intel","Core i9-13900K","High",3300],["CPU","Intel","Core i9-14900K","High",3700],["CPU","Intel","Core Ultra 5 245K","Mid",1800],["CPU","Intel","Core Ultra 7 265K","High",2500],["CPU","Intel","Core Ultra 9 285K","High",3900],["RAM","Outro","4 GB DDR3","Low",80],["RAM","Outro","8 GB DDR3","Low",150],["RAM","Outro","8 GB DDR4","Low",200],["RAM","Outro","16 GB DDR4","Mid",350],["RAM","Outro","32 GB DDR4","High",650],["RAM","Outro","64 GB DDR4","High",1200],["RAM","Outro","8 GB DDR5","Low",300],["RAM","Outro","16 GB DDR5","Mid",600],["RAM","Outro","32 GB DDR5","High",1100],["RAM","Outro","64 GB DDR5","High",2200],["Placa-mae","Outro","H61 / H81 (Intel antiga)","Low",250],["Placa-mae","Outro","H410M (Intel 10ª)","Low",450],["Placa-mae","Outro","H510M (Intel 11ª)","Low",500],["Placa-mae","Outro","H610M (Intel 12ª+)","Low",550],["Placa-mae","Outro","B660M (Intel 12ª)","Mid",700],["Placa-mae","Outro","B760M (Intel 13ª/14ª)","Mid",800],["Placa-mae","Outro","Z690 / Z790 (Intel)","High",1500],["Placa-mae","Outro","Z890 (Intel Core Ultra)","High",2200],["Placa-mae","Outro","A320M (AMD AM4)","Low",300],["Placa-mae","Outro","A520M (AMD AM4)","Low",450],["Placa-mae","Outro","B450M (AMD AM4)","Mid",500],["Placa-mae","Outro","B550M (AMD AM4)","Mid",650],["Placa-mae","Outro","X570 (AMD AM4)","High",1100],["Placa-mae","Outro","A620M (AMD AM5)","Mid",650],["Placa-mae","Outro","B650M (AMD AM5)","Mid",900],["Placa-mae","Outro","B650 / B850 (AMD AM5)","High",1200],["Placa-mae","Outro","X670 / X870 (AMD AM5)","High",1900]];
+
+function seedPricing_() {
+  const ts = table_('Servicos');
+  if (!ts.rows.length) {
+    [['Montagem de computador', 'Montagem completa e organização dos cabos.', 'percentual', 100],
+     ['Limpeza', 'Limpeza interna e externa do computador.', 'classe', ''],
+     ['Formatação', 'Reinstalação do sistema e programas essenciais.', 'classe', '']].forEach(function (x, i) {
+      appendRow_(ts, { IDServico: 'SV' + (i + 1), Nome: x[0], Descricao: x[1], Modo: x[2], PrecoUnico: '', PrecoLow: '', PrecoMid: '', PrecoHigh: '', ParteDoPercentual: x[3], Ordem: i + 1, Ativo: 'Sim' });
+    });
+  }
+  const tc = table_('Componentes');
+  if (!tc.rows.length) {
+    const rows = SEED_COMPONENTS.map(function (c, i) {
+      return ['C' + ('000' + (i + 1)).slice(-4), c[0], c[1], c[2], c[3], c[4], 'Sim'];
+    });
+    replaceTable_('Componentes', rows);
+  }
+}
+
+/** Substitui todo o conteúdo (menos o cabeçalho) de uma aba. */
+function replaceTable_(name, rows) {
+  const sh = ss_().getSheetByName(name);
+  const cols = SHEETS[name].length;
+  const last = sh.getLastRow();
+  if (last > 1) sh.deleteRows(2, last - 1);
+  if (!rows.length) return;
+  const need = rows.length + 1;
+  if (sh.getMaxRows() < need) sh.insertRowsAfter(sh.getMaxRows(), need - sh.getMaxRows());
+  sh.getRange(2, 1, rows.length, cols).setValues(rows.map(function (r) { return r.map(safe_); }));
+}
+
+function num_(v) {
+  if (v === '' || v == null) return null;
+  const n = Number(String(v).replace(',', '.'));
+  return isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : NaN;
+}
+
+function pricingFaixas_() {
+  const st = getSettings_(), d = DEFAULT_SETTINGS;
+  const g = function (k) { const n = Number(String(st[k] != null && st[k] !== '' ? st[k] : d[k]).replace(',', '.')); return isFinite(n) ? n : Number(d[k]); };
+  return { limite1: g('FaixaLimite1'), pct1: g('FaixaPct1'), limite2: g('FaixaLimite2'), pct2: g('FaixaPct2'), pct3: g('FaixaPct3') };
+}
+
+function pricingView_(onlyActive) {
+  const sv = table_('Servicos').rows.map(function (r) {
+    return { id: r.IDServico, nome: r.Nome, descricao: r.Descricao, modo: r.Modo, precoUnico: num_(r.PrecoUnico), precoLow: num_(r.PrecoLow), precoMid: num_(r.PrecoMid), precoHigh: num_(r.PrecoHigh),
+      parte: r.ParteDoPercentual === '' ? 100 : Number(r.ParteDoPercentual), ordem: Number(r.Ordem) || 0, ativo: r.Ativo !== 'Não' };
+  }).filter(function (x) { return !onlyActive || x.ativo; }).sort(function (a, b) { return a.ordem - b.ordem; });
+  const cp = table_('Componentes').rows.map(function (r) {
+    return { id: r.IDComponente, tipo: r.Tipo, marca: r.Marca, nome: r.Nome, classe: r.Classe, preco: Number(r.PrecoEstimado) || 0, ativo: r.Ativo !== 'Não' };
+  }).filter(function (x) { return !onlyActive || x.ativo; });
+  return { servicos: sv, componentes: cp, faixas: pricingFaixas_() };
+}
+
+function getServicePricing_() {
+  const cache = CacheService.getScriptCache(), hit = cache.get('pub:svc');
+  if (hit) { try { return JSON.parse(hit); } catch (e) { /* recalcula */ } }
+  const v = pricingView_(true);
+  try { cache.put('pub:svc', JSON.stringify(v), 300); } catch (e) { /* grande demais: segue sem cache */ }
+  return v;
+}
+
+function adminServicePricing_() { return pricingView_(false); }
+
+function saveServicePricing_(d, user) {
+  return withLock_(function () {
+    const sv = Array.isArray(d.servicos) ? d.servicos : [], cp = Array.isArray(d.componentes) ? d.componentes : [], f = d.faixas || {};
+    if (sv.length > 40) throw new ApiError('VALIDATION', 'No máximo 40 serviços.');
+    if (cp.length > 400) throw new ApiError('VALIDATION', 'No máximo 400 peças.');
+    const money = function (v, label) { const n = num_(v); if (n !== null && isNaN(n)) throw new ApiError('VALIDATION', label + ': valor inválido.'); return n; };
+    const usedS = [], rowsS = sv.map(function (x, i) {
+      const nome = String(x.nome || '').trim().slice(0, 80);
+      if (nome.length < 2) throw new ApiError('VALIDATION', 'Dê um nome a todos os serviços.');
+      const modo = PRICING_MODES.indexOf(x.modo) >= 0 ? x.modo : 'unico';
+      let id = /^[A-Za-z0-9-]{2,30}$/.test(String(x.id || '')) && usedS.indexOf(x.id) < 0 ? x.id : newId_('SV', usedS); usedS.push(id);
+      const parte = money(x.parte, nome + ' (parte do percentual)'); if (parte !== null && parte > 200) throw new ApiError('VALIDATION', nome + ': a parte do percentual deve ficar entre 0 e 200.');
+      const pm = function (v, l) { const n = money(v, nome + ' (' + l + ')'); return n === null ? '' : n; };
+      return [id, nome, String(x.descricao || '').trim().slice(0, 300), modo, pm(x.precoUnico, 'valor único'), pm(x.precoLow, 'Low end'), pm(x.precoMid, 'Mid end'), pm(x.precoHigh, 'High end'), parte === null ? 100 : parte, i + 1, x.ativo === false ? 'Não' : 'Sim'];
+    });
+    const usedC = [], rowsC = cp.map(function (x) {
+      const nome = String(x.nome || '').trim().slice(0, 100);
+      if (nome.length < 2) throw new ApiError('VALIDATION', 'Há uma peça sem nome.');
+      if (COMP_TYPES.indexOf(x.tipo) < 0) throw new ApiError('VALIDATION', nome + ': tipo inválido.');
+      if (COMP_CLASSES.indexOf(x.classe) < 0) throw new ApiError('VALIDATION', nome + ': escolha Low, Mid ou High.');
+      const preco = money(x.preco, nome); if (preco === null) throw new ApiError('VALIDATION', nome + ': informe o preço estimado.');
+      let id = /^[A-Za-z0-9-]{2,30}$/.test(String(x.id || '')) && usedC.indexOf(x.id) < 0 ? x.id : newId_('C', usedC); usedC.push(id);
+      return [id, x.tipo, String(x.marca || 'Outro').trim().slice(0, 30), nome, x.classe, preco, x.ativo === false ? 'Não' : 'Sim'];
+    });
+    const l1 = money(f.limite1, 'Limite da 1ª faixa'), l2 = money(f.limite2, 'Limite da 2ª faixa'), p1 = money(f.pct1, '% da 1ª faixa'), p2 = money(f.pct2, '% da 2ª faixa'), p3 = money(f.pct3, '% da 3ª faixa');
+    if ([l1, l2, p1, p2, p3].some(function (v) { return v === null; })) throw new ApiError('VALIDATION', 'Preencha os limites e percentuais das faixas.');
+    if (!(l1 > 0) || !(l2 > l1)) throw new ApiError('VALIDATION', 'O limite da 2ª faixa deve ser maior que o da 1ª.');
+    if ([p1, p2, p3].some(function (v) { return v > 100; })) throw new ApiError('VALIDATION', 'Os percentuais devem ficar entre 0 e 100.');
+    replaceTable_('Servicos', rowsS);
+    replaceTable_('Componentes', rowsC);
+    const t = table_('Configuracoes');
+    [['FaixaLimite1', l1], ['FaixaPct1', p1], ['FaixaLimite2', l2], ['FaixaPct2', p2], ['FaixaPct3', p3]].forEach(function (kv) {
+      const ex = t.rows.find(function (r) { return r.Chave === kv[0]; });
+      if (ex) writeRow_(t, ex._row, { Valor: String(kv[1]) }); else appendRow_(t, { Chave: kv[0], Valor: String(kv[1]) });
+    });
+    CacheService.getScriptCache().remove('pub:svc');
+    audit_(user.login, 'SERVICOS_VALORES_SALVAR', sv.length + ' serviços / ' + cp.length + ' peças', 'OK');
+    return pricingView_(false);
+  });
+}
+
 
 /* ============================ AUXILIARES ============================ */
 

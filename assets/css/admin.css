@@ -100,3 +100,9 @@ dialog.dlg::backdrop{background:rgba(0,0,0,.7);backdrop-filter:blur(3px)}
 }
 .artbox{border:1px solid rgba(57,255,20,.3);border-radius:14px;padding:12px 14px;background:rgba(57,255,20,.04);display:grid;gap:6px}
 .artbox>b{font-size:14px}
+.vl{display:grid;gap:3px;font-size:12px;color:var(--mute)}
+.v3{display:grid;grid-template-columns:repeat(3,minmax(88px,1fr));gap:8px}
+.savebar{position:sticky;bottom:0;display:flex;gap:14px;align-items:center;justify-content:flex-end;padding:12px 0;background:linear-gradient(0deg,var(--bg) 70%,transparent);margin-top:6px}
+.savebar .formerr{flex:1;min-height:0}
+.tbl td input.in,.tbl td select.in{min-height:38px;padding:6px 10px;font-size:13.5px}
+#vsv td:first-child{min-width:190px}#vcp td:first-child{min-width:220px}

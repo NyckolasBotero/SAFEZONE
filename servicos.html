@@ -17,10 +17,20 @@
 <div id="hdr"></div>
 <main id="main">
 <div class="wrap"><div class="page-h"><h1>Serviços de informática</h1><p>Solicite um orçamento pelo WhatsApp. Valores e prazos são combinados no atendimento.</p></div>
-<div class="svc-grid" id="svcGrid" style="margin:24px 0 40px"></div>
+<section id="qSec" class="q" hidden aria-labelledby="qT">
+<div class="sec-h"><h2 id="qT">Monte seu orçamento</h2></div>
+<p class="q-lead">Escolha os serviços e, se souber, informe as peças do seu PC. O valor é calculado na hora. Se não souber, é só pular que a gente te orienta no atendimento.</p>
+<div class="q-grid"><div class="q-main">
+<h3 class="q-h"><span>1</span> Serviços desejados</h3><div class="q-svcs" id="qSvcs"></div>
+<div id="qCfg" hidden><h3 class="q-h"><span>2</span> Configuração do seu PC</h3>
+<div class="q-top"><p class="q-help">Escolha as peças que você tem. Pode deixar em branco o que não souber.</p><button type="button" class="btn" id="qUnk" aria-pressed="false">Não sei minha config</button></div>
+<div class="q-fields" id="qFields"></div><p class="q-unk" id="qUnkMsg" hidden>Sem problema! Vamos entender o seu computador direto no atendimento. Selecione os serviços e clique em entrar em contato.</p></div>
+</div><aside class="q-sum" id="qSum" aria-live="polite"></aside></div></section>
+<div class="sec-h"><h2>Todos os serviços</h2></div>
+<div class="svc-grid" id="svcGrid" style="margin:16px 0 40px"></div>
 <section id="svcRegSec" hidden><div class="sec-h"><h2>Serviços cadastrados</h2></div><div class="grid" id="svcReg" style="margin-bottom:40px"></div></section></div>
 </main>
 <div id="ftr"></div>
-<script src="assets/js/config.js"></script><script src="assets/js/util.js"></script><script src="assets/js/public.js"></script>
+<script src="assets/js/config.js"></script><script src="assets/js/util.js"></script><script src="assets/js/quote.js"></script><script src="assets/js/public.js"></script>
 </body>
 </html>

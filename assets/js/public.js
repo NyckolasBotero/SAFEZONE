@@ -154,8 +154,46 @@
     } catch (e) { $('#svcRegSec').hidden = true; }
   }
 
+  /* ---------------------- orçamento de serviços (calculadora) ---------------------- */
+  async function quote() {
+    const sec = $('#qSec'); if (!sec || !window.SZQuote) return;
+    let data; try { data = await SZ.call('getServicePricing'); } catch (e) { return; }
+    const svcs = (data.servicos || []).filter(s => s.nome); if (!svcs.length) return;
+    sec.hidden = false;
+    const picked = new Set(), sel = {}; let unknown = false;
+    const comps = t => (data.componentes || []).filter(c => c.tipo === t);
+    const KINDS = [['gpu', 'Placa de vídeo', 'GPU'], ['cpu', 'Processador', 'CPU'], ['ram', 'Memória RAM', 'RAM'], ['mb', 'Placa-mãe', 'Placa-mae']];
+    const CL = SZQuote.CLASS_LABEL, ORD = { Low: 0, Mid: 1, High: 2 };
+    $('#qFields').innerHTML = KINDS.map(([k, label, tipo]) => {
+      const list = comps(tipo).slice().sort((a, b) => (a.marca || '').localeCompare(b.marca || '') || ORD[a.classe] - ORD[b.classe] || a.preco - b.preco);
+      const brands = [...new Set(list.map(c => c.marca || 'Outro'))];
+      const groups = brands.map(b => `<optgroup label="${esc(b)}">${list.filter(c => (c.marca || 'Outro') === b).map(c => `<option value="${esc(c.id)}">${esc(c.nome)} · ${CL[c.classe] || ''}</option>`).join('')}</optgroup>`).join('');
+      return `<label class="fld">${label}<select class="in" data-k="${k}"><option value="">${k === 'gpu' ? 'Não informar' : 'Não sei / não informar'}</option>${k === 'gpu' ? '<option value="none">Integrada (sem placa de vídeo dedicada)</option>' : ''}${groups}</select></label>`;
+    }).join('');
+    $('#qSvcs').innerHTML = svcs.map(s => `<button type="button" class="q-svc" data-id="${esc(s.id)}" aria-pressed="false"><span class="q-chk" aria-hidden="true"></span><span><b>${esc(s.nome)}</b>${s.descricao ? `<small>${esc(s.descricao)}</small>` : ''}</span></button>`).join('');
+    function draw() {
+      const chosen = svcs.filter(s => picked.has(s.id)), sum = $('#qSum');
+      $('#qCfg').hidden = !chosen.some(s => s.modo !== 'unico');
+      $('#qFields').hidden = unknown; $('#qUnkMsg').hidden = !unknown;
+      $('#qUnk').setAttribute('aria-pressed', unknown); $('#qUnk').textContent = unknown ? 'Prefiro informar minha config' : 'Não sei minha config';
+      if (!chosen.length) { sum.innerHTML = '<h3>Seu orçamento</h3><p class="q-help">Selecione ao menos um serviço para ver o valor.</p>'; return; }
+      const q = SZQuote.build({ services: chosen, sel, unknown, faixas: data.faixas });
+      const hint = q.needsConfig && !q.hasConfig && !unknown ? '<p class="q-help">Informe as peças ao lado para ver os valores, ou clique em <b>Não sei minha config</b>.</p>' : '';
+      sum.innerHTML = `<h3>Seu orçamento</h3><ul class="q-lines">${q.lines.map(l => `<li><span>${esc(l.sv.nome)}</span><b>${l.valor != null ? (l.aprox ? 'cerca de ' : '') + SZQuote.brl(l.valor) : `<em>${esc(l.motivo || 'a combinar')}</em>`}</b></li>`).join('')}</ul>${hint}
+        ${q.hasConfig && q.value > 0 ? `<div class="q-pc"><span>Valor estimado do PC</span><b>${SZQuote.brl(q.value)}</b>${q.clsLabel ? `<span class="q-cls q-${q.cls}">${esc(q.clsLabel)}</span>` : ''}</div>` : ''}
+        ${q.total > 0 ? `<div class="q-total"><span>${q.approx || q.pending ? 'Total estimado' : 'Total'}</span><b>${SZQuote.brl(q.total)}</b></div>${q.pending ? '<p class="q-help">Itens a combinar não entram na soma.</p>' : ''}` : ''}
+        <a class="btn btn-pri" id="qGo" target="_blank" rel="noopener" href="${SZ.waUrl(SZQuote.message(q, sel), SET.TelefoneComercial)}">${SZ.icon('wa', 18)} Entrar em contato</a>
+        <p class="q-note">Valores estimados com base em preços de mercado das peças. A confirmação é feita no atendimento.</p>`;
+    }
+    $('#qSvcs').addEventListener('click', ev => { const b = ev.target.closest('.q-svc'); if (!b) return; const id = b.dataset.id; picked.has(id) ? picked.delete(id) : picked.add(id); b.setAttribute('aria-pressed', picked.has(id)); draw(); });
+    $('#qFields').addEventListener('change', ev => { const s = ev.target.closest('select'); if (!s) return; const k = s.dataset.k; delete sel[k]; if (k === 'gpu') sel.noGpu = s.value === 'none'; if (s.value && s.value !== 'none') sel[k] = (data.componentes || []).find(c => c.id === s.value); draw(); });
+    $('#qUnk').onclick = () => { unknown = !unknown; draw(); };
+    draw();
+  }
+
   (async function init() {
     await layout();
     ({ home, catalog, product, services }[page] || (() => {}))();
+    if (page === 'services') quote();
   })();
 })();
