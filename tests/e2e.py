@@ -158,9 +158,48 @@ with sync_playwright() as p:
     ok('wa.me/5561966665555' in sp.locator('#svcGrid .svc a').first.get_attribute('href'), 'serviços usam o número de serviços')
     sp.wait_for_selector('.q-svc'); sp.locator('.q-svc').nth(0).click(); sp.wait_for_selector('#qGo')
     ok('wa.me/5561966665555' in sp.get_attribute('#qGo','href'), 'orçamento da calculadora usa o número de serviços')
-        # ---------- permissões ----------
+        # ---------- feedbacks de clientes ----------
+    import subprocess
+    subprocess.run(['ffmpeg','-y','-loglevel','quiet','-f','lavfi','-i','testsrc=duration=1:size=160x284:rate=10','-pix_fmt','yuv420p','/tmp/clip.mp4'])
+    sp.goto(BASE+'/feedbacks.html'); sp.evaluate("localStorage.clear()"); sp.reload(); sp.wait_for_selector('#fbEmpty:not([hidden]) h2')
+    ok('Em breve' in sp.inner_text('#fbEmpty') and sp.locator('#fbQuotesSec').is_hidden() and sp.locator('#fbWallSec').is_hidden(), 'sem avaliações reais: aviso "em breve", nada inventado no carrossel')
+    sp.goto(BASE+'/index.html'); sp.wait_for_selector('.card'); ok(sp.locator('#hlSec').is_hidden(), 'home não mostra carrossel de avaliações enquanto não há reais')
+    pg.click('[data-go=feedbacks]'); pg.wait_for_selector('#fnew'); ok('Nenhuma avaliação' in pg.inner_text('#fbody'), 'aba Feedbacks vazia no início')
+    # nova 5★ com print
+    pg.click('#fnew'); pg.wait_for_selector('#r_it'); pg.select_option('#r_it', index=1); item=pg.locator('#r_it option:checked').inner_text()
+    pg.fill('#r_cl','Ana Paula Souza'); pg.fill('#r_co','Ótimo produto, atendimento excelente!'); pg.set_input_files('#r_file','/home/claude/safezone/tests/assets/foto-teste.jpg'); pg.wait_for_selector('#r_img img')
+    pg.click('#r_save'); pg.wait_for_function("document.querySelector('#r_err').innerText.includes('autoriz')"); ok(True, 'publicar sem autorização do cliente é bloqueado')
+    pg.check('#r_au'); pg.click('#r_save'); pg.wait_for_selector('#fbody table')
+    ok('Destaque' in pg.inner_text('#fbody') and 'Ana Paula Souza' in pg.inner_text('#fbody'), 'avaliação 5★ criada com destaque, agrupada por item: '+item)
+    # 3★: destaque desativado e sem exibição por padrão
+    pg.click('#fnew'); pg.wait_for_selector('#r_it'); pg.select_option('#r_it', index=1); pg.fill('#r_cl','Bruno Lima'); pg.fill('#r_co','Demorou um pouco para chegar.'); pg.click('#r_st .rb[data-n="3"]')
+    ok(pg.locator('#r_de').is_disabled() and not pg.locator('#r_np').is_checked() and not pg.locator('#r_po').is_checked(), 'nota 3: destaque bloqueado e sem exibição automática')
+    pg.check('#r_au'); pg.click('#r_save'); pg.wait_for_function("document.querySelectorAll('#fbody tbody tr').length==2")
+    ok('Só interno' in pg.inner_text('#fbody'), 'avaliação baixa fica só interna')
+    # vídeos: link + arquivo
+    pg.click('[data-t=vid]'); pg.wait_for_selector('#v_link'); pg.fill('#v_t','Montagem completa'); pg.fill('#v_u','https://youtu.be/dQw4w9WgXcQ'); pg.click('#v_link'); pg.wait_for_selector('#fbody tbody tr')
+    pg.fill('#v_u','https://evil.com/x'); pg.click('#v_link'); pg.wait_for_function("document.querySelector('#v_err').innerText.length>0"); ok('inválido' in pg.inner_text('#v_err'), 'link de vídeo inválido é recusado')
+    pg.fill('#v_t','Limpeza de PC'); pg.set_input_files('#v_file','/tmp/clip.mp4'); pg.wait_for_function("document.querySelectorAll('#fbody tbody tr').length==2", timeout=30000); ok(True, 'vídeo enviado por arquivo e outro por link')
+    # site público
+    ctx.route('https://drive.google.com/**', lambda r: r.fulfill(status=200, body=open('/tmp/clip.mp4','rb').read(), headers={'content-type':'video/mp4','access-control-allow-origin':'*'}))
+    ctx.route('https://www.youtube-nocookie.com/**', lambda r: r.fulfill(status=200, body='<html></html>', headers={'content-type':'text/html'}))
+    sp.goto(BASE+'/index.html'); sp.evaluate("localStorage.clear()"); sp.reload(); sp.wait_for_selector('#hlSec:not([hidden]) .qc')
+    ok('Ótimo produto, atendimento excelente!' in sp.inner_text('#hlQuotes') and 'Ana S.' in sp.inner_text('#hlQuotes') and 'Bruno' not in sp.inner_text('#hlSec'), 'home: carrossel só com a avaliação 5★ real (nome abreviado)')
+    sp.screenshot(path=str(OUT/'home_feedbacks.png'), full_page=False)
+    sp.goto(BASE+'/feedbacks.html'); sp.wait_for_selector('#fbWall .fb-item'); sp.wait_for_selector('#fbVids .fb-v')
+    ok(sp.locator('#fbVids .fb-v').count()==2 and sp.locator('#fbWall .fb-item').count()==1 and 'Bruno' not in sp.inner_text('main'), 'página Feedbacks: print + resumo, 2 vídeos e nenhuma avaliação baixa')
+    ok(item.split(' · ')[0][:10] in sp.inner_text('#fbWall') and 'Ana S.' in sp.inner_text('#fbWall'), 'print mostra cliente e item comprado ao lado')
+    sp.wait_for_timeout(1500); sp.screenshot(path=str(OUT/'feedbacks_desktop.png'), full_page=True)
+    sp.click('#fbWall [data-zoom]'); sp.wait_for_selector('#lb[open]'); ok(True, 'print abre ampliado'); sp.click('#lbX')
+    link=sp.locator('#fbWall .fb-who a').first.get_attribute('href'); sp.goto(BASE+'/'+link); sp.wait_for_selector('#pdReviews:not([hidden]) .pd-rv')
+    ok('Ana S.' in sp.inner_text('#pdReviews') and 'Bruno' not in sp.inner_text('#pdReviews'), 'página do item mostra quem já comprou (só a 5★)')
+    # dono decide mostrar a de 3★ no item
+    pg.click('[data-t=rev]'); pg.wait_for_selector('#fbody table'); pg.locator('tr:has-text("Bruno") [data-ed]').click(); pg.wait_for_selector('#r_np'); pg.check('#r_np'); pg.click('#r_save'); pg.wait_for_selector('.toast.show'); pg.wait_for_timeout(600)
+    sp.evaluate("localStorage.clear()"); sp.reload(); sp.wait_for_function("document.querySelector('#pdReviews').innerText.includes('Bruno')")
+    sp.goto(BASE+'/index.html'); sp.wait_for_selector('#hlSec:not([hidden]) .qc'); ok('Bruno' not in sp.inner_text('#hlSec'), 'avaliação baixa liberada no item continua fora do destaque da home')
+    # ---------- permissões ----------
     c2=b.new_context(viewport={'width':1360,'height':900}); setup(c2); v=c2.new_page(); watch(v,'vendedor'); v.goto(BASE+'/admin/'); v.fill('#lu','vendas@safezone.com'); v.fill('#lp','Outra12345'); v.click('#lb'); v.wait_for_selector('.shell')
-    tabs=v.locator('#nav > button').all_inner_texts(); ok(len(tabs)==1 and 'Vendas' in tabs[0], 'usuário só com "Vendas" vê apenas a aba Vendas: '+str(tabs))
+    tabs=v.locator('#nav > button').all_inner_texts(); ok(len(tabs)==2 and 'Vendas' in tabs[0] and 'Feedbacks' in tabs[1], 'usuário só com "Vendas" vê Vendas e Feedbacks (sem Adm, Produtos, Configurações): '+str(tabs))
     tok=v.evaluate("JSON.parse(sessionStorage.getItem('sz_sess')).token")
     r=v.evaluate("""async t=>{const r=await fetch('https://script.google.com/macros/s/x/exec',{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({action:'listUsers',data:{},token:t})});return r.json()}""", tok)
     ok(r['ok'] is False and r['error']['code']=='FORBIDDEN', 'backend nega listUsers a quem não é admin: '+r['error']['code'])

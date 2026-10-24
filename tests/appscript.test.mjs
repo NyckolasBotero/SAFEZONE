@@ -110,3 +110,57 @@ test('valores de serviços: base inicial, leitura pública, salvar e validar', (
   assert.equal(e.call('saveSettings', { valores: { TelefoneComercial: '123' } }, dono).ok, false);
   assert.equal(e.call('saveSettings', { valores: { TelefoneComercial: '+55 (61) 99999-1234' } }, dono).data.TelefoneComercial, '5561999991234');
 });
+
+test('feedbacks: destaque só com 5 estrelas, autorização obrigatória e exibição controlada', () => {
+  const e = makeEnv(seed);
+  const dono = e.call('login', { login: 'dono@safezone.com', password: 'SenhaForte123' }).data.token;
+  const vend = e.call('login', { login: 'vendas@safezone.com', password: 'Outra12345' }).data.token;
+  assert.ok(e.call('adminFeedbacks', {}, vend).ok, 'quem tem Vendas acessa feedbacks');
+  assert.equal(e.call('saveUser', { login: 'x@y.com', nome: 'X', password: 'SenhaBoa1234', acesso: 'Configurações' }, dono).ok, true);
+  const cfg = e.call('login', { login: 'x@y.com', password: 'SenhaBoa1234' }).data.token;
+  assert.equal(e.call('adminFeedbacks', {}, cfg).error.code, 'FORBIDDEN', 'só Configurações não acessa');
+  assert.equal(e.call('saveReview', { cliente: 'Ana', estrelas: 5, produto: 'Mouse' }, undefined).error.code, 'SESSION');
+  // sem autorização não publica
+  assert.equal(e.call('saveReview', { cliente: 'Ana', estrelas: 5, produto: 'Mouse Gamer', status: 'Publicado' }, dono).ok, false);
+  const five = e.call('saveReview', { cliente: 'Ana P.', estrelas: 5, produto: 'Mouse Gamer', comentario: 'Ótimo produto, atendimento excelente!', autorizado: true }, dono);
+  assert.ok(five.ok, JSON.stringify(five));
+  const three = e.call('saveReview', { cliente: 'Bruno', estrelas: 3, produto: 'Mouse Gamer', comentario: 'Demorou um pouco', autorizado: true, destaque: true }, dono);
+  const oculto = e.call('saveReview', { cliente: 'Caio', estrelas: 5, produto: 'Teclado', status: 'Oculto' }, dono);
+  assert.ok(three.ok && oculto.ok);
+  let pub = e.call('getFeedbacks', {}).data;
+  assert.deepEqual(pub.avaliacoes.map(a => a.cliente), ['Ana P.'], 'só a 5★ autorizada e publicada aparece; a de 3★ não vai para lugar nenhum por padrão');
+  assert.equal(pub.avaliacoes[0].destaque, true);
+  assert.ok(!('observacoes' in pub.avaliacoes[0]) && !('autorizado' in pub.avaliacoes[0]), 'campos internos não vazam');
+  const adm = e.call('adminFeedbacks', {}, dono).data.avaliacoes;
+  assert.equal(adm.find(a => a.cliente === 'Bruno').destaque, false, 'destaque forçado a falso abaixo de 5★');
+  // dono decide mostrar a de 3★ no item (mas continua fora do destaque)
+  assert.ok(e.call('saveReview', { id: three.data.id, cliente: 'Bruno', estrelas: 3, produto: 'Mouse Gamer', autorizado: true, noProduto: true, destaque: true }, dono).ok);
+  pub = e.call('getFeedbacks', {}).data;
+  const b = pub.avaliacoes.find(a => a.cliente === 'Bruno');
+  assert.ok(b && b.noProduto && !b.destaque && !b.noPortfolio);
+  // editar para 4★ mantém escolhas; imagem inválida e estrelas inválidas
+  assert.equal(e.call('saveReview', { cliente: 'Dani', estrelas: 6, produto: 'X Item' }, dono).ok, false);
+  assert.equal(e.call('saveReview', { cliente: 'Dani', estrelas: 5, produto: 'X Item', autorizado: true, imagem: 'https://evil.com/a.png' }, dono).ok, false);
+  // exclusão
+  assert.ok(e.call('deleteReview', { id: five.data.id }, dono).ok);
+  assert.ok(!e.call('getFeedbacks', {}).data.avaliacoes.some(a => a.cliente === 'Ana P.'));
+});
+
+test('vídeos: link validado, upload ao Drive e ordem', () => {
+  const e = makeEnv(seed);
+  const dono = e.call('login', { login: 'dono@safezone.com', password: 'SenhaForte123' }).data.token;
+  assert.equal(e.call('saveVideo', { tipo: 'link', url: 'javascript:alert(1)' }, dono).ok, false);
+  assert.equal(e.call('saveVideo', { tipo: 'link', url: 'https://evil.com/pagina' }, dono).ok, false);
+  const yt = e.call('saveVideo', { tipo: 'link', titulo: 'Montagem', url: 'https://youtu.be/dQw4w9WgXcQ' }, dono);
+  assert.ok(yt.ok);
+  const up = e.call('uploadMedia', { mimeType: 'video/mp4', base64: Buffer.from('fake-video-bytes').toString('base64') }, dono);
+  assert.ok(up.ok && up.data.tipo === 'video');
+  assert.equal(e.call('uploadMedia', { mimeType: 'application/pdf', base64: 'AAAA' }, dono).ok, false);
+  const v2 = e.call('saveVideo', { tipo: 'upload', titulo: 'Limpeza', arquivoId: up.data.fileId }, dono);
+  assert.ok(v2.ok);
+  const pub = e.call('getFeedbacks', {}).data.videos;
+  assert.deepEqual(pub.map(v => v.titulo), ['Montagem', 'Limpeza']);
+  assert.ok(e.call('saveVideo', { id: v2.data.id, tipo: 'upload', arquivoId: up.data.fileId, status: 'Oculto' }, dono).ok);
+  assert.equal(e.call('getFeedbacks', {}).data.videos.length, 1);
+  assert.ok(e.call('deleteVideo', { id: yt.data.id }, dono).ok);
+});

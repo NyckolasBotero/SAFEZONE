@@ -102,6 +102,7 @@
     wa: '<path d="M3 21l1.6-4.7A8.5 8.5 0 1 1 8 19.6z"/><path d="M9 9.5c0 3 2.5 5.5 5.5 5.5l1.3-1.5-2-1-.8.7a3.5 3.5 0 0 1-1.9-1.9l.7-.8-1-2z"/>',
     bolt: '<path d="M13 2L4 14h6l-1 8 9-12h-6z"/>',
     shield: '<path d="M12 2l8 3v6c0 5-3.5 9-8 11-4.5-2-8-6-8-11V5z"/>',
+    star: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/>',
     menu: '<path d="M3 6h18M3 12h18M3 18h18"/>',
     x: '<path d="M6 6l12 12M18 6L6 18"/>',
     ig: '<rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><path d="M17.5 6.5h.01"/>'
@@ -163,6 +164,36 @@
       const a = ev.target.closest('[data-interest]'); if (!a) return;
       const p = byId(a.dataset.interest); if (p) SZ.registerInterest(p, origem);
     });
+  };
+
+  /** Estrelas (1 a 5), acessíveis. */
+  SZ.stars = n => { n = Math.max(0, Math.min(5, Math.round(Number(n) || 0))); return `<span class="stars" role="img" aria-label="${n} de 5 estrelas">${'★'.repeat(n)}<i>${'★'.repeat(5 - n)}</i></span>`; };
+  /** Nome para exibir no site: primeiro nome + inicial do último (ex.: "Ana P."), sem expor o nome completo. */
+  SZ.shortName = n => { const w = String(n || '').trim().split(/\s+/).filter(Boolean); return w.length > 1 ? `${w[0]} ${w[w.length - 1].charAt(0).toUpperCase()}.` : (w[0] || ''); };
+  const ytId = u => { const m = /(?:youtu\.be\/|youtube(?:-nocookie)?\.com\/(?:watch\?(?:.*&)?v=|shorts\/|embed\/|live\/))([A-Za-z0-9_-]{6,15})/.exec(u); return m ? m[1] : ''; };
+  const driveId = u => { const m = /drive\.google\.com\/file\/d\/([A-Za-z0-9_-]{10,80})/.exec(u); return m ? m[1] : ''; };
+  /** Player de vídeo sem controles, mudo e em loop (YouTube, Drive ou arquivo direto). */
+  SZ.videoHtml = v => {
+    const t = SZ.esc(v.titulo || ''), yid = ytId(v.url), did = driveId(v.url);
+    let inner;
+    if (yid) inner = `<iframe data-src="https://www.youtube-nocookie.com/embed/${yid}?autoplay=1&mute=1&loop=1&playlist=${yid}&controls=0&modestbranding=1&playsinline=1&rel=0" title="${t || 'Vídeo'}" allow="autoplay; encrypted-media; picture-in-picture" loading="lazy" referrerpolicy="strict-origin-when-cross-origin"></iframe>`;
+    else if (did) inner = `<video muted loop playsinline preload="metadata" data-drive="${did}" src="https://drive.google.com/uc?export=download&id=${did}"></video>`;
+    else inner = `<video muted loop playsinline preload="metadata" src="${SZ.esc(v.url)}"></video>`;
+    return `<div class="fb-v">${inner}${t ? `<span class="fb-vt">${t}</span>` : ''}</div>`;
+  };
+  /** Liga os vídeos: toca só o que está na tela; se o Drive recusar o arquivo, usa o player do Drive. */
+  SZ.wireVideos = root => {
+    root.addEventListener('error', ev => {
+      const v = ev.target; if (!(v instanceof HTMLVideoElement) || !v.dataset.drive) return;
+      const f = document.createElement('iframe'); f.src = `https://drive.google.com/file/d/${v.dataset.drive}/preview`; f.setAttribute('allow', 'autoplay'); f.title = 'Vídeo'; v.replaceWith(f);
+    }, true);
+    if (!('IntersectionObserver' in window)) return;
+    const io = new IntersectionObserver(es => es.forEach(e => {
+      const el = e.target;
+      if (el.tagName === 'VIDEO') { if (e.isIntersecting) { const p = el.play(); if (p && p.catch) p.catch(() => {}); } else el.pause(); }
+      else if (el.tagName === 'IFRAME' && e.isIntersecting && !el.src && el.dataset.src) el.src = el.dataset.src;
+    }), { threshold: 0.4 });
+    root.querySelectorAll('video,iframe[data-src]').forEach(el => io.observe(el));
   };
 
   SZ.toast = function (msg, kind) {

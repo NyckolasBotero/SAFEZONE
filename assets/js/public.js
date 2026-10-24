@@ -8,7 +8,7 @@
   const norm = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
   const skeleton = n => Array.from({ length: n }, () => '<div class="skel" aria-hidden="true"></div>').join('');
   const errBox = (msg, retry) => `<div class="errbox" role="alert"><p>${esc(msg)}</p><button class="btn" id="retry">Tentar novamente</button></div>`;
-  const nav = [['index.html', 'Início', 'home'], ['catalogo.html', 'Catálogo', 'catalog'], ['catalogo.html?promo=1', 'Ofertas', 'offers'], ['servicos.html', 'Serviços', 'services']];
+  const nav = [['index.html', 'Início', 'home'], ['catalogo.html', 'Catálogo', 'catalog'], ['catalogo.html?promo=1', 'Ofertas', 'offers'], ['servicos.html', 'Serviços', 'services'], ['feedbacks.html', 'Feedbacks', 'feedbacks']];
 
   let readyRes; const ready = new Promise(r => { readyRes = r; }), hooks = []; let settled = false;
   const digits = p => SZ.phoneDigits(p);
@@ -62,6 +62,66 @@
     SZ.swr('products', () => SZ.call('listProducts'), l => { last = l; ready.then(() => draw(l)); }).catch(e => { if (!last) onFail(e); });
   }
 
+  /* -------------------------- feedbacks (dados compartilhados) -------------------------- */
+  function useFeedbacks(draw) {
+    let last = null;
+    hooks.push(() => { if (last) draw(last); });
+    return SZ.swr('feedbacks', () => SZ.call('getFeedbacks'), d => { last = d; ready.then(() => draw(d)); }).catch(() => { if (!last) draw({ avaliacoes: [], videos: [] }); });
+  }
+  const quoteCard = a => `<figure class="qc"><div class="qc-top">${SZ.stars(a.estrelas)}</div><blockquote>${esc(a.comentario || 'Compra aprovada!')}</blockquote><figcaption><b>${esc(SZ.shortName(a.cliente))}</b><span>${esc(a.produto)}</span></figcaption></figure>`;
+  /** Faixa que passa sozinha (duplicada para o loop ficar contínuo). */
+  const marquee = (box, items, rev) => {
+    const html = items.map(quoteCard).join('');
+    const rep = Math.max(2, Math.ceil(8 / items.length));
+    const one = Array.from({ length: rep }, () => html).join('');
+    box.innerHTML = `<div class="mq-track ${rev ? 'rev' : ''}" style="--mq:${Math.max(24, items.length * rep * 5)}s"><div class="mq-set">${one}</div><div class="mq-set" aria-hidden="true">${one}</div></div>`;
+  };
+  function reveal(root) {
+    const els = [...root.querySelectorAll('.rv:not(.in)')]; if (!els.length) return;
+    if (!('IntersectionObserver' in window) || matchMedia('(prefers-reduced-motion:reduce)').matches) { els.forEach(e => e.classList.add('in')); return; }
+    const io = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } }), { threshold: 0.15 });
+    els.forEach(e => io.observe(e));
+    setTimeout(() => els.forEach(e => e.classList.add('in')), 6000); /* garantia: nunca deixa conteúdo invisível */
+  }
+  function lightbox() {
+    const dlg = $('#lb'); if (!dlg || dlg.dataset.on) return; dlg.dataset.on = '1';
+    document.addEventListener('click', ev => { const b = ev.target.closest('[data-zoom]'); if (b) { $('#lbImg').src = b.dataset.zoom; $('#lbImg').alt = b.dataset.alt || ''; dlg.showModal(); } });
+    $('#lbX').onclick = () => dlg.close(); dlg.addEventListener('click', ev => { if (ev.target === dlg) dlg.close(); });
+  }
+
+  /* ------------------------------ página Feedbacks ------------------------------ */
+  function feedbacks() {
+    const counters = (box, vals) => {
+      box.innerHTML = vals.map(([n, t]) => `<div class="fb-stat"><b data-n="${n}">0</b><span>${esc(t)}</span></div>`).join(''); box.hidden = !vals.length;
+      const run = el => { const to = +el.dataset.n, t0 = performance.now(); const tick = t => { const k = Math.min(1, (t - t0) / 1200); el.textContent = Math.round(to * (1 - Math.pow(1 - k, 3))); if (k < 1) requestAnimationFrame(tick); }; requestAnimationFrame(tick); };
+      box.querySelectorAll('b').forEach(run);
+    };
+    let wired = false;
+    lightbox();
+    window.addEventListener('scroll', () => document.documentElement.style.setProperty('--sy', Math.min(window.scrollY, 900)), { passive: true });
+    useFeedbacks(d => {
+      const quotes = d.avaliacoes.filter(a => a.destaque), prints = d.avaliacoes.filter(a => a.noPortfolio && a.imagem), vids = d.videos || [];
+      const any = quotes.length || prints.length || vids.length;
+      $('#fbEmpty').hidden = !!any;
+      if (!any) { $('#fbEmpty .fb-empty').innerHTML = '<h2>Em breve por aqui</h2><p>Estamos reunindo os primeiros feedbacks de clientes. Enquanto isso, veja nossos <a href="catalogo.html">produtos</a> ou peça um <a href="servicos.html">orçamento de serviços</a>.</p>'; }
+      counters($('#fbStats'), [[quotes.length, quotes.length === 1 ? 'avaliação 5 estrelas' : 'avaliações 5 estrelas'], [prints.length, prints.length === 1 ? 'conversa real' : 'conversas reais'], [vids.length, vids.length === 1 ? 'vídeo dos bastidores' : 'vídeos dos bastidores']].filter(x => x[0] > 0));
+      $('#fbQuotesSec').hidden = !quotes.length; if (quotes.length) marquee($('#fbQuotes'), quotes);
+      $('#fbWallSec').hidden = !prints.length;
+      $('#fbWall').innerHTML = prints.map((a, i) => `<article class="fb-item rv ${i % 2 ? 'alt' : ''}"><figure class="fb-shot"><button type="button" data-zoom="${esc(SZ.thumb(a.imagem, 1600))}" data-alt="Conversa com ${esc(SZ.shortName(a.cliente))}" aria-label="Ampliar conversa de ${esc(SZ.shortName(a.cliente))}"><img src="${esc(SZ.thumb(a.imagem, 720))}" alt="Print da conversa com ${esc(SZ.shortName(a.cliente))}" loading="lazy" decoding="async"></button></figure>
+        <div class="fb-info">${SZ.stars(a.estrelas)}<blockquote>${esc(a.comentario || 'Cliente satisfeito com a compra.')}</blockquote><div class="fb-who"><b>${esc(SZ.shortName(a.cliente))}</b><span>Comprou: ${a.idAnuncio ? `<a href="produto.html?id=${encodeURIComponent(a.idAnuncio)}">${esc(a.produto)}</a>` : esc(a.produto)}</span>${a.dataCompra ? `<small>${esc(SZ.dt(a.dataCompra))}</small>` : ''}</div></div></article>`).join('');
+      $('#fbVidSec').hidden = !vids.length;
+      $('#fbVids').innerHTML = vids.map(SZ.videoHtml).join('');
+      if (vids.length) SZ.wireVideos($('#fbVids'));
+      reveal(document);
+      if (!wired) {
+        wired = true; const tr = $('#fbVids'), step = () => Math.max(240, tr.clientWidth * .8);
+        $('#vPrev').onclick = () => tr.scrollBy({ left: -step(), behavior: 'smooth' }); $('#vNext').onclick = () => tr.scrollBy({ left: step(), behavior: 'smooth' });
+        let hov = false; tr.addEventListener('mouseenter', () => hov = true); tr.addEventListener('mouseleave', () => hov = false); tr.addEventListener('touchstart', () => hov = true, { passive: true });
+        if (!matchMedia('(prefers-reduced-motion:reduce)').matches) setInterval(() => { if (hov || document.hidden || !tr.children.length) return; if (tr.scrollLeft + tr.clientWidth >= tr.scrollWidth - 8) tr.scrollTo({ left: 0, behavior: 'smooth' }); else tr.scrollBy({ left: step(), behavior: 'smooth' }); }, 6000);
+      }
+    });
+  }
+
   /* ------------------------------ início ------------------------------ */
   function home() {
     const off = $('#offers'), rec = $('#recent');
@@ -69,6 +129,7 @@
     off.innerHTML = skeleton(4); rec.innerHTML = skeleton(4);
     const promo = $('#promoBox'); if (promo) hooks.push(() => { promo.hidden = !SET.CanalOfertas; $('#promoLink').href = SET.CanalOfertas || '#'; });
     ready.then(() => { if (promo) { promo.hidden = !SET.CanalOfertas; $('#promoLink').href = SET.CanalOfertas || '#'; } });
+    useFeedbacks(d => { const q = d.avaliacoes.filter(a => a.destaque), sec = $('#hlSec'); if (!sec) return; sec.hidden = !q.length; if (q.length) marquee($('#hlQuotes'), q); });
     let bound = false, list = [];
     useProducts(l => {
       list = l; if (!bound) { bound = true; SZ.bindInterest(document, id => list.find(p => p.id === id), 'Site'); }
@@ -124,7 +185,7 @@
     const root = $('#pd'), id = new URLSearchParams(location.search).get('id');
     if (!id) { root.innerHTML = '<div class="empty">Produto não informado. <a href="catalogo.html" style="color:var(--neon2)">Ver catálogo</a></div>'; return; }
     root.innerHTML = '<div class="skel" style="aspect-ratio:1/1"></div><div class="skel" style="aspect-ratio:4/3"></div>';
-    let cur = null, shown = false;
+    let cur = null, shown = false, fbData = null;
     const fail = e => { root.innerHTML = e.code === 'NOT_FOUND' ? '<div class="empty">Este anúncio não está mais disponível. <a href="catalogo.html" style="color:var(--neon2)">Ver outros produtos</a></div>' : errBox(e.message); const r = $('#retry'); if (r) r.onclick = () => { root.innerHTML = '<div class="skel" style="aspect-ratio:1/1"></div><div class="skel" style="aspect-ratio:4/3"></div>'; product(); }; };
     function render(p) {
     cur = p; shown = true;
@@ -152,10 +213,19 @@
           <div class="nf">${esc(SET.AvisoNFe || '')}</div></div>
         ${p.descricaoCompleta || p.descricaoCurta ? `<h2>Descrição</h2><div class="desc">${esc(p.descricaoCompleta || p.descricaoCurta)}</div>` : ''}
         ${p.especificacoes.length ? `<h2>Especificações técnicas</h2><table class="specs"><tbody>${p.especificacoes.map(s => `<tr><td>${esc(s.item)}</td><td>${esc(s.valor)}</td></tr>`).join('')}</tbody></table>` : ''}</div>`;
+    let rv = $('#pdReviews'); if (!rv) { rv = document.createElement('section'); rv.id = 'pdReviews'; rv.className = 'pd-rev'; rv.hidden = true; root.parentNode.appendChild(rv); }
     $('#crumb').innerHTML = `<a href="index.html">Início</a> / <a href="catalogo.html">Catálogo</a> / <a href="catalogo.html?cat=${encodeURIComponent(p.categoria)}">${esc(p.categoria)}</a>`;
     const wa = $('#wa'); if (wa) wa.addEventListener('click', () => SZ.registerInterest(p, 'Detalhes'));
     root.onclick = ev => { const b = ev.target.closest('[data-i]'); if (!b) return; $('#gimg').src = SZ.thumb(photos[+b.dataset.i], 1200); $$('.gal-thumbs button').forEach(x => x.setAttribute('aria-current', x === b)); };
+      drawRev();
     }
+    lightbox();
+    function drawRev() {
+      const rv = $('#pdReviews'); if (!rv || !fbData) return; const d = fbData, mine = d.avaliacoes.filter(a => a.noProduto && a.idAnuncio === id);
+      rv.hidden = !mine.length; if (!mine.length) { rv.innerHTML = ''; return; }
+      rv.innerHTML = `<div class="wrap"><div class="sec-h"><h2>Quem já comprou este item</h2></div><div class="pd-rev-list">${mine.map(a => `<article class="pd-rv">${SZ.stars(a.estrelas)}<p>${esc(a.comentario || '')}</p><div class="fb-who"><b>${esc(SZ.shortName(a.cliente))}</b>${a.dataCompra ? `<small>${esc(SZ.dt(a.dataCompra))}</small>` : ''}</div>${a.imagem ? `<button type="button" class="pd-shot" data-zoom="${esc(SZ.thumb(a.imagem, 1600))}" data-alt="Conversa com ${esc(SZ.shortName(a.cliente))}"><img src="${esc(SZ.thumb(a.imagem, 360))}" alt="Print da conversa com ${esc(SZ.shortName(a.cliente))}" loading="lazy"></button>` : ''}</article>`).join('')}</div></div>`;
+    }
+    useFeedbacks(d => { fbData = d; drawRev(); });
     hooks.push(() => { if (cur) render(cur); });
     SZ.productSWR(id, p => ready.then(() => render(p))).catch(e => { if (!shown) fail(e); });
   }
@@ -230,7 +300,7 @@
 
   (function init() {
     layout();
-    ({ home, catalog, product, services }[page] || (() => {}))();
+    ({ home, catalog, product, services, feedbacks }[page] || (() => {}))();
     if (page === 'services') quote();
   })();
 })();

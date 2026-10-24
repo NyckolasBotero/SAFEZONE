@@ -26,7 +26,8 @@ const CFG = {
   LOCK_SECONDS: 900,         // 15 min de bloqueio
   HASH_ROUNDS: 1500,
   FOLDER_NAME: 'Safezone_Imagens',
-  MAX_IMAGE_BYTES: 5 * 1024 * 1024
+  MAX_IMAGE_BYTES: 5 * 1024 * 1024,
+  MAX_VIDEO_BYTES: 25 * 1024 * 1024
 };
 
 const MIGRATED = '(protegida)';
@@ -51,6 +52,8 @@ const SHEETS = {
   Vendas: ['IDVenda', 'Data', 'IDAnuncio', 'NomeProduto', 'Quantidade', 'ValorUnitario', 'ValorTotal',
     'Status', 'Origem', 'Observacoes', 'DataAtualizacao'],
   Layouts: ['IDLayout', 'Nome', 'Formato', 'Configuracao', 'DataCriacao', 'DataAtualizacao', 'CriadoPor'],
+  Avaliacoes: ['IDAvaliacao', 'IDAnuncio', 'Produto', 'Cliente', 'Estrelas', 'Comentario', 'Observacoes', 'Imagem', 'Autorizado', 'Status', 'Destaque', 'NoProduto', 'NoPortfolio', 'DataCompra', 'DataCriacao', 'DataAtualizacao', 'CriadoPor'],
+  Videos: ['IDVideo', 'Titulo', 'Tipo', 'Url', 'ArquivoID', 'Ordem', 'Status', 'DataCriacao'],
   Servicos: ['IDServico', 'Nome', 'Descricao', 'Modo', 'PrecoUnico', 'PrecoLow', 'PrecoMid', 'PrecoHigh', 'ParteDoPercentual', 'Ordem', 'Ativo'],
   Componentes: ['IDComponente', 'Tipo', 'Marca', 'Nome', 'Classe', 'PrecoEstimado', 'Ativo'],
   Configuracoes: ['Chave', 'Valor'],
@@ -135,6 +138,7 @@ const ROUTES = {
   getSettings:     { auth: null,       fn: getSettings_ },
   registerInterest:{ auth: null,       fn: registerInterest_, write: true },
   getServicePricing:{ auth: null,      fn: getServicePricing_ },
+  getFeedbacks:    { auth: null,       fn: getFeedbacks_ },
   // sessão
   login:           { auth: null,       fn: login_ },
   logout:          { auth: 'any',      fn: logout_ },
@@ -152,6 +156,13 @@ const ROUTES = {
   updateSale:      { auth: 'vendas',   fn: updateSale_, write: true },
   // configurações
   saveSettings:    { auth: 'config',   fn: saveSettings_, write: true },
+  adminFeedbacks:  { auth: 'feedbacks', fn: adminFeedbacks_ },
+  saveReview:      { auth: 'feedbacks', fn: saveReview_, write: true },
+  deleteReview:    { auth: 'feedbacks', fn: deleteReview_, write: true },
+  saveVideo:       { auth: 'feedbacks', fn: saveVideo_, write: true },
+  deleteVideo:     { auth: 'feedbacks', fn: deleteVideo_, write: true },
+  uploadMedia:     { auth: 'feedbacks', fn: uploadMedia_, write: true },
+  deleteMedia:     { auth: 'feedbacks', fn: deleteImage_, write: true },
   adminServicePricing:{ auth: 'config', fn: adminServicePricing_ },
   saveServicePricing:{ auth: 'config', fn: saveServicePricing_, write: true },
   // aba Adm
@@ -351,6 +362,7 @@ function allowed_(u, area) {
   if (u.isAdmin) return true;
   if (area === 'adm') return false;
   if (area === 'layouts') return u.perms.indexOf('produtos') >= 0;
+  if (area === 'feedbacks') return u.perms.indexOf('vendas') >= 0 || u.perms.indexOf('produtos') >= 0;
   const need = { produtos: 'produtos', vendas: 'vendas', config: 'configuracoes' }[area];
   return u.perms.indexOf(need) >= 0;
 }
@@ -1042,6 +1054,166 @@ function saveServicePricing_(d, user) {
     audit_(user.login, 'SERVICOS_VALORES_SALVAR', sv.length + ' serviços / ' + cp.length + ' peças', 'OK');
     return pricingView_(false);
   });
+}
+
+
+/* ============================== FEEDBACKS · AVALIAÇÕES · VÍDEOS ============================== */
+
+const IMG_MIME = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
+const VID_MIME = { 'video/mp4': 'mp4', 'video/webm': 'webm', 'video/quicktime': 'mov' };
+
+function yes_(v) { return v === true || v === 'Sim' || v === 'true' || v === 1; }
+
+/** Regras de exibição de uma avaliação (única fonte de verdade).
+ *  - Só aparece publicamente se estiver Publicada E o cliente tiver autorizado.
+ *  - Destaque (carrossel da loja) só existe para 5 estrelas.
+ *  - Avaliações abaixo de 5 só aparecem no item/portfólio se o dono marcar de propósito. */
+function reviewFlags_(estrelas, d, prev) {
+  const five = estrelas === 5;
+  const pick = function (key, rowKey) {
+    if (d[key] !== undefined && d[key] !== null && d[key] !== '') return yes_(d[key]);
+    if (prev) return yes_(prev[rowKey]);
+    return five;
+  };
+  return { Destaque: five && pick('destaque', 'Destaque') ? 'Sim' : 'Não', NoProduto: pick('noProduto', 'NoProduto') ? 'Sim' : 'Não', NoPortfolio: pick('noPortfolio', 'NoPortfolio') ? 'Sim' : 'Não' };
+}
+
+function reviewView_(r, admin) {
+  const v = { id: r.IDAvaliacao, idAnuncio: r.IDAnuncio || '', produto: r.Produto, cliente: r.Cliente, estrelas: Number(r.Estrelas) || 0, comentario: r.Comentario || '', imagem: r.Imagem || '',
+    destaque: r.Destaque === 'Sim', noProduto: r.NoProduto === 'Sim', noPortfolio: r.NoPortfolio === 'Sim', dataCompra: cell_(r.DataCompra) ? String(cell_(r.DataCompra)).slice(0, 10) : '' };
+  if (admin) { v.observacoes = r.Observacoes || ''; v.autorizado = r.Autorizado === 'Sim'; v.status = r.Status; v.dataCriacao = cell_(r.DataCriacao); v.criadoPor = r.CriadoPor; }
+  return v;
+}
+
+function videoView_(r) {
+  return { id: r.IDVideo, titulo: r.Titulo || '', tipo: r.Tipo, url: r.Url || '', arquivoId: r.ArquivoID || '', ordem: Number(r.Ordem) || 0, status: r.Status };
+}
+
+function getFeedbacks_() {
+  const cache = CacheService.getScriptCache(), hit = cache.get('pub:fb');
+  if (hit) { try { return JSON.parse(hit); } catch (e) { /* recalcula */ } }
+  const rev = table_('Avaliacoes').rows.filter(function (r) {
+    return r.Status === 'Publicado' && r.Autorizado === 'Sim' && (r.Destaque === 'Sim' || r.NoProduto === 'Sim' || r.NoPortfolio === 'Sim');
+  }).sort(function (a, b) { return String(cell_(b.DataCriacao)).localeCompare(String(cell_(a.DataCriacao))); }).map(function (r) { return reviewView_(r, false); });
+  const vid = table_('Videos').rows.filter(function (r) { return r.Status === 'Publicado'; }).map(videoView_).sort(function (a, b) { return a.ordem - b.ordem; });
+  const out = { avaliacoes: rev, videos: vid };
+  try { cache.put('pub:fb', JSON.stringify(out), 120); } catch (e) { /* sem cache */ }
+  return out;
+}
+
+function adminFeedbacks_() {
+  const rev = table_('Avaliacoes').rows.sort(function (a, b) { return String(cell_(b.DataCriacao)).localeCompare(String(cell_(a.DataCriacao))); }).map(function (r) { return reviewView_(r, true); });
+  const vid = table_('Videos').rows.map(videoView_).sort(function (a, b) { return a.ordem - b.ordem; });
+  return { avaliacoes: rev, videos: vid };
+}
+
+function saveReview_(d, user) {
+  return withLock_(function () {
+    const s = function (x, max) { return String(x == null ? '' : x).trim().slice(0, max); };
+    const cliente = s(d.cliente, 60);
+    if (cliente.length < 2) throw new ApiError('VALIDATION', 'Informe o nome do cliente (como ele pode aparecer no site).');
+    const estrelas = Math.round(Number(d.estrelas));
+    if (!(estrelas >= 1 && estrelas <= 5)) throw new ApiError('VALIDATION', 'Escolha de 1 a 5 estrelas.');
+    let idAnuncio = s(d.idAnuncio, 40), produto = s(d.produto, 140);
+    if (idAnuncio) {
+      const a = table_('Anuncios').rows.find(function (r) { return r.ID === idAnuncio; });
+      if (a) produto = a.Nome; else idAnuncio = '';
+    }
+    if (produto.length < 2) throw new ApiError('VALIDATION', 'Informe o item comprado.');
+    const imagem = s(d.imagem, 400);
+    if (imagem && !validUrl_(imagem)) throw new ApiError('VALIDATION', 'Imagem inválida.');
+    const status = d.status === 'Oculto' ? 'Oculto' : 'Publicado';
+    const autorizado = yes_(d.autorizado);
+    if (status === 'Publicado' && !autorizado) throw new ApiError('VALIDATION', 'Para publicar no site, confirme que o cliente autorizou o uso do nome e da conversa. Sem autorização, deixe como Oculto.');
+    const dc = s(d.dataCompra, 10);
+    if (dc && !/^\d{4}-\d{2}-\d{2}$/.test(dc)) throw new ApiError('VALIDATION', 'Data da compra inválida.');
+    const t = table_('Avaliacoes');
+    const ex = d.id ? t.rows.find(function (r) { return r.IDAvaliacao === String(d.id); }) : null;
+    if (d.id && !ex) throw new ApiError('NOT_FOUND', 'Avaliação não encontrada.');
+    const f = reviewFlags_(estrelas, d, ex);
+    const row = { IDAnuncio: idAnuncio, Produto: produto, Cliente: cliente, Estrelas: estrelas, Comentario: s(d.comentario, 220), Observacoes: s(d.observacoes, 1000), Imagem: imagem,
+      Autorizado: autorizado ? 'Sim' : 'Não', Status: status, Destaque: f.Destaque, NoProduto: f.NoProduto, NoPortfolio: f.NoPortfolio, DataCompra: dc, DataAtualizacao: now_() };
+    let id;
+    if (ex) { id = ex.IDAvaliacao; writeRow_(t, ex._row, row); }
+    else { id = newId_('AV', t.rows.map(function (r) { return r.IDAvaliacao; })); row.IDAvaliacao = id; row.DataCriacao = now_(); row.CriadoPor = user.login; appendRow_(t, row); }
+    CacheService.getScriptCache().remove('pub:fb');
+    audit_(user.login, ex ? 'AVALIACAO_EDITAR' : 'AVALIACAO_CRIAR', id, 'OK');
+    return { id: id };
+  });
+}
+
+function deleteReview_(d, user) {
+  return withLock_(function () {
+    const t = table_('Avaliacoes');
+    const r = t.rows.find(function (x) { return x.IDAvaliacao === String(d.id || ''); });
+    if (!r) throw new ApiError('NOT_FOUND', 'Avaliação não encontrada.');
+    t.sh.deleteRow(r._row);
+    CacheService.getScriptCache().remove('pub:fb');
+    audit_(user.login, 'AVALIACAO_EXCLUIR', r.IDAvaliacao, 'OK');
+    return { ok: true };
+  });
+}
+
+/** Vídeo por link (YouTube, Google Drive ou arquivo .mp4/.webm direto) ou por arquivo enviado ao Drive da loja. */
+function videoLinkOk_(u) {
+  if (!/^https:\/\/[^\s"'<>]{4,380}$/.test(u)) return false;
+  return /^https:\/\/(www\.|m\.)?(youtube\.com|youtu\.be|youtube-nocookie\.com)\//.test(u) || /^https:\/\/drive\.google\.com\/file\/d\/[A-Za-z0-9_-]{10,80}/.test(u) || /\.(mp4|webm)(\?[^\s]*)?$/i.test(u);
+}
+
+function saveVideo_(d, user) {
+  return withLock_(function () {
+    const s = function (x, max) { return String(x == null ? '' : x).trim().slice(0, max); };
+    const tipo = d.tipo === 'upload' ? 'upload' : 'link';
+    const titulo = s(d.titulo, 80);
+    let url = s(d.url, 400), arquivo = s(d.arquivoId, 80);
+    if (tipo === 'upload') {
+      if (!/^[A-Za-z0-9_-]{10,80}$/.test(arquivo)) throw new ApiError('VALIDATION', 'Envie o arquivo de vídeo.');
+      url = 'https://drive.google.com/file/d/' + arquivo + '/view';
+    } else {
+      if (!videoLinkOk_(url)) throw new ApiError('VALIDATION', 'Link inválido. Use YouTube, Google Drive ou um arquivo .mp4/.webm (https).');
+      arquivo = '';
+    }
+    const t = table_('Videos');
+    const ex = d.id ? t.rows.find(function (r) { return r.IDVideo === String(d.id); }) : null;
+    if (d.id && !ex) throw new ApiError('NOT_FOUND', 'Vídeo não encontrado.');
+    const ordem = Number(d.ordem); 
+    const row = { Titulo: titulo, Tipo: tipo, Url: url, ArquivoID: arquivo, Ordem: isFinite(ordem) && ordem > 0 ? Math.round(ordem) : (ex ? ex.Ordem : t.rows.length + 1), Status: d.status === 'Oculto' ? 'Oculto' : 'Publicado' };
+    let id;
+    if (ex) { id = ex.IDVideo; writeRow_(t, ex._row, row); }
+    else { if (t.rows.length >= 30) throw new ApiError('VALIDATION', 'Limite de 30 vídeos.'); id = newId_('VD', t.rows.map(function (r) { return r.IDVideo; })); row.IDVideo = id; row.DataCriacao = now_(); appendRow_(t, row); }
+    CacheService.getScriptCache().remove('pub:fb');
+    audit_(user.login, ex ? 'VIDEO_EDITAR' : 'VIDEO_CRIAR', id, 'OK');
+    return { id: id };
+  });
+}
+
+function deleteVideo_(d, user) {
+  return withLock_(function () {
+    const t = table_('Videos');
+    const r = t.rows.find(function (x) { return x.IDVideo === String(d.id || ''); });
+    if (!r) throw new ApiError('NOT_FOUND', 'Vídeo não encontrado.');
+    t.sh.deleteRow(r._row);
+    if (r.Tipo === 'upload' && r.ArquivoID) { try { deleteImage_({ fileId: r.ArquivoID }, user); } catch (e) { /* arquivo já removido */ } }
+    CacheService.getScriptCache().remove('pub:fb');
+    audit_(user.login, 'VIDEO_EXCLUIR', r.IDVideo, 'OK');
+    return { ok: true };
+  });
+}
+
+/** Envia imagem (print de conversa) ou vídeo curto para a pasta da loja no Drive. */
+function uploadMedia_(d, user) {
+  const mime = String(d.mimeType || ''), isVid = !!VID_MIME[mime], ext = isVid ? VID_MIME[mime] : IMG_MIME[mime];
+  if (!ext) throw new ApiError('VALIDATION', 'Envie imagem (JPG, PNG, WEBP) ou vídeo (MP4, WEBM, MOV).');
+  const max = isVid ? CFG.MAX_VIDEO_BYTES : CFG.MAX_IMAGE_BYTES, label = isVid ? '25 MB' : '5 MB';
+  const b64 = String(d.base64 || '');
+  if (!b64 || b64.length > Math.ceil(max * 4 / 3) + 16) throw new ApiError('VALIDATION', 'Arquivo vazio ou maior que ' + label + '.');
+  const bytes = Utilities.base64Decode(b64);
+  if (bytes.length > max) throw new ApiError('VALIDATION', 'Arquivo maior que ' + label + '.');
+  const name = (isVid ? 'sz-vid-' : 'sz-') + Date.now() + '-' + Math.random().toString(36).slice(2, 6) + '.' + ext;
+  const f = getFolder_().createFile(Utilities.newBlob(bytes, mime, name));
+  f.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  audit_(user.login, isVid ? 'VIDEO_ENVIAR' : 'IMAGEM_ENVIAR', f.getId(), 'OK');
+  return { fileId: f.getId(), tipo: isVid ? 'video' : 'imagem', url: isVid ? 'https://drive.google.com/file/d/' + f.getId() + '/view' : 'https://lh3.googleusercontent.com/d/' + f.getId() };
 }
 
 

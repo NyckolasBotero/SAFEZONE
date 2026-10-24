@@ -104,3 +104,6 @@ dialog.dlg::backdrop{background:rgba(0,0,0,.7);backdrop-filter:blur(3px)}
 .savebar .formerr{flex:1;min-height:0}
 .tbl td input.in,.tbl td select.in{min-height:38px;padding:6px 10px;font-size:13.5px}
 #vsv td:first-child{min-width:190px}#vcp td:first-child{min-width:220px}
+
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 16px}.tabs .btn[aria-pressed=true]{border-color:var(--neon);color:var(--neon);background:rgba(57,255,20,.07)}
+.rate{display:flex;gap:4px}.rb{background:none;border:0;font-size:32px;line-height:1;color:#3a3f3a;cursor:pointer;padding:2px 4px;min-width:44px;min-height:44px;transition:transform .15s,color .15s}.rb.on{color:#FFC94D;text-shadow:0 0 14px rgba(255,201,77,.4)}.rb:hover{transform:scale(1.15)}

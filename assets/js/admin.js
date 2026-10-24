@@ -49,7 +49,7 @@
   }
 
   /* ------------------------------ estrutura ------------------------------ */
-  const TABS = [['vendas', 'Vendas', 'box', () => can('vendas')], ['adm', 'Adm', 'shield', () => A.user.isAdmin], ['produtos', 'Produtos', 'cpu', () => can('produtos')], ['valores', 'Valores Serviços', 'board', () => can('configuracoes')], ['contatos', 'Contatos', 'wa', () => can('configuracoes')], ['config', 'Configurações', 'wrench', () => can('configuracoes')]];
+  const TABS = [['vendas', 'Vendas', 'box', () => can('vendas')], ['adm', 'Adm', 'shield', () => A.user.isAdmin], ['produtos', 'Produtos', 'cpu', () => can('produtos')], ['valores', 'Valores Serviços', 'board', () => can('configuracoes')], ['contatos', 'Contatos', 'wa', () => can('configuracoes')], ['feedbacks', 'Feedbacks', 'star', () => can('vendas') || can('produtos')], ['config', 'Configurações', 'wrench', () => can('configuracoes')]];
   const SUBS = [['indicadores', 'Indicadores'], ['logins', 'Logins'], ['postagem', 'Postagem de vendas'], ['layouts', 'Criação de layouts']];
   function boot() {
     const first = TABS.find(t => t[3]());
@@ -65,7 +65,7 @@
     let t = TABS.find(x => x[0] === v && x[3]()) || TABS.find(x => x[3]());
     A.view = t[0]; if (A.view === 'adm') A.sub = SUBS.some(x => x[0] === s) ? s : 'indicadores';
     renderNav(); const el = $('#view');
-    ({ vendas: salesView, adm: admView, produtos: productsView, valores: valuesView, contatos: contactsView, config: settingsView }[A.view])(el);
+    ({ vendas: salesView, adm: admView, produtos: productsView, valores: valuesView, contatos: contactsView, feedbacks: feedbacksView, config: settingsView }[A.view])(el);
   }
   function renderNav() {
     $('#nav').innerHTML = TABS.filter(t => t[3]()).map(t => `<button class="nv" data-go="${t[0]}" aria-current="${A.view === t[0]}">${SZ.icon(t[2], 18)} ${t[1]}</button>${t[0] === 'adm' && A.view === 'adm' ? `<div class="sub">${SUBS.map(s => `<button class="nv" data-go="adm/${s[0]}" aria-current="${A.sub === s[0]}">${s[1]}</button>`).join('')}</div>` : ''}`).join('');
@@ -517,6 +517,134 @@
       catch (e) { err.textContent = e.message || 'Erro ao salvar.'; b.disabled = false; b.textContent = 'Salvar valores'; }
     }
     draw();
+  }
+
+  /* ------------------------------ feedbacks de clientes ------------------------------ */
+  const fileB64 = f => new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(',')[1]); r.onerror = () => no(new Error('Não foi possível ler o arquivo.')); r.readAsDataURL(f); });
+  const driveFileId = u => { const m = /\/d\/([A-Za-z0-9_-]{10,80})/.exec(String(u || '')); return m ? m[1] : ''; };
+
+  async function feedbacksView(el) {
+    el.innerHTML = `<h1>Feedbacks de clientes</h1><p class="lead">Avaliações por item, prints de conversas e vídeos que aparecem na guia Feedbacks do site.</p>
+      <div class="tabs" role="tablist"><button class="btn" data-t="rev" aria-pressed="true">Avaliações e prints</button><button class="btn" data-t="vid" aria-pressed="false">Vídeos</button></div><div id="fbody">${loadingHtml}</div>`;
+    let D, tab = 'rev', F = { item: '', stars: '', st: '' };
+    async function load() {
+      try { D = await api('adminFeedbacks'); draw(); } catch (e) { $('#fbody').innerHTML = errHtml(e, 'fretry'); $('#fretry').onclick = () => { $('#fbody').innerHTML = loadingHtml; load(); }; }
+    }
+    $$('[data-t]', el).forEach(b => b.onclick = () => { tab = b.dataset.t; $$('[data-t]', el).forEach(x => x.setAttribute('aria-pressed', x === b)); if (D) draw(); });
+    const flag = (on, t) => on ? `<span class="pill ok">${t}</span>` : '';
+    function draw() { tab === 'rev' ? drawReviews() : drawVideos(); }
+
+    /* ---- avaliações, agrupadas por item ---- */
+    function drawReviews() {
+      const all = D.avaliacoes, items = [...new Set(all.map(a => a.produto))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+      const list = all.filter(a => (!F.item || a.produto === F.item) && (!F.stars || String(a.estrelas) === F.stars) && (!F.st || (F.st === 'Publicado' ? a.status === 'Publicado' && a.autorizado : !(a.status === 'Publicado' && a.autorizado))));
+      const groups = {}; list.forEach(a => { (groups[a.produto] = groups[a.produto] || []).push(a); });
+      const n5 = all.filter(a => a.estrelas === 5 && a.status === 'Publicado' && a.autorizado && a.destaque).length;
+      $('#fbody').innerHTML = `<div class="cards"><div class="stat"><small>Avaliações</small><b>${all.length}</b></div><div class="stat hl"><small>Em destaque (5★)</small><b>${n5}</b><em>aparecem no carrossel</em></div><div class="stat"><small>Prints publicados</small><b>${all.filter(a => a.imagem && a.noPortfolio && a.status === 'Publicado' && a.autorizado).length}</b></div></div>
+        <div class="note info">Só vão para o site avaliações <b>publicadas</b> e com <b>autorização do cliente</b>. O destaque (carrossel) é só para <b>5 estrelas</b>. Avaliações menores nunca vão para o destaque e só aparecem no item ou no portfólio se você marcar.</div>
+        <div class="bar"><label class="fld"><span class="sr">Item</span><select class="in" id="fi"><option value="">Todos os itens</option>${items.map(i => `<option ${i === F.item ? 'selected' : ''}>${esc(i)}</option>`).join('')}</select></label>
+          <label class="fld"><span class="sr">Estrelas</span><select class="in" id="fs"><option value="">Todas as notas</option>${[5, 4, 3, 2, 1].map(n => `<option value="${n}" ${String(n) === F.stars ? 'selected' : ''}>${n} estrela${n > 1 ? 's' : ''}</option>`).join('')}</select></label>
+          <label class="fld"><span class="sr">Situação</span><select class="in" id="ft"><option value="">Todas</option><option ${F.st === 'Publicado' ? 'selected' : ''}>Publicado</option><option value="Fora" ${F.st === 'Fora' ? 'selected' : ''}>Fora do site</option></select></label>
+          <span class="grow"></span><button class="btn btn-pri" id="fnew">+ Nova avaliação</button></div>
+        ${Object.keys(groups).length ? Object.keys(groups).sort((a, b) => a.localeCompare(b, 'pt-BR')).map(prod => { const g = groups[prod], avg = (g.reduce((x, a) => x + a.estrelas, 0) / g.length).toFixed(1).replace('.', ',');
+          return `<section class="panel"><h2>${esc(prod)} <small style="color:var(--mute);font-weight:400">· ${g.length} avaliação${g.length > 1 ? 'ões' : ''} · média ${avg} (uso interno)</small></h2>
+          <p class="q-help" style="margin:0 0 10px"><b>Quem já comprou:</b> ${esc(g.map(a => a.cliente).join(', '))}</p>
+          <div class="tw"><table class="tbl rs"><thead><tr><th></th><th>Cliente</th><th>Nota</th><th>Comentário</th><th>Onde aparece</th><th></th></tr></thead><tbody>${g.map(a => `<tr data-id="${esc(a.id)}">
+            <td>${a.imagem ? `<img class="thumb" src="${esc(SZ.thumb(a.imagem, 96))}" alt="Print" loading="lazy">` : ''}</td><td data-l="Cliente"><b>${esc(a.cliente)}</b>${a.dataCompra ? `<br><small style="color:var(--mute)">${esc(SZ.dt(a.dataCompra))}</small>` : ''}</td>
+            <td data-l="Nota">${SZ.stars(a.estrelas)}</td><td data-l="Comentário" style="max-width:320px">${esc(a.comentario)}${a.observacoes ? `<br><small style="color:var(--mute)">Obs.: ${esc(a.observacoes)}</small>` : ''}</td>
+            <td data-l="Onde aparece">${a.status !== 'Publicado' ? '<span class="pill mute">Oculto</span>' : !a.autorizado ? '<span class="pill warn">Sem autorização</span>' : flag(a.destaque, 'Destaque') + flag(a.noProduto, 'No item') + flag(a.noPortfolio, 'Portfólio') || '<span class="pill mute">Só interno</span>'}</td>
+            <td><div class="acts"><button class="btn btn-sm" data-ed>Editar</button><button class="btn btn-sm" data-rm>Excluir</button></div></td></tr>`).join('')}</tbody></table></div></section>`; }).join('')
+          : `<div class="empty">${all.length ? 'Nenhuma avaliação com esses filtros.' : 'Nenhuma avaliação cadastrada ainda. Clique em “Nova avaliação” e registre o primeiro feedback real.'}</div>`}`;
+      $('#fi').onchange = e => { F.item = e.target.value; draw(); }; $('#fs').onchange = e => { F.stars = e.target.value; draw(); }; $('#ft').onchange = e => { F.st = e.target.value; draw(); };
+      $('#fnew').onclick = () => reviewForm(null);
+      $('#fbody').onclick = async ev => {
+        const tr = ev.target.closest('tr[data-id]'); if (!tr) return; const a = D.avaliacoes.find(x => x.id === tr.dataset.id);
+        if (ev.target.closest('[data-ed]')) reviewForm(a);
+        if (ev.target.closest('[data-rm]')) { if (!confirm(`Excluir a avaliação de ${a.cliente}?`)) return; try { await api('deleteReview', { id: a.id }); const fid = driveFileId(a.imagem); if (fid) api('deleteMedia', { fileId: fid }).catch(() => {}); SZ.toast('Avaliação excluída.'); load(); } catch (e) { fail(e); } }
+      };
+    }
+
+    async function reviewForm(a) {
+      let prods = []; try { prods = await api('listAllProducts'); } catch (e) { try { prods = await SZ.products(true); } catch (e2) { prods = []; } }
+      const isNew = !a; let img = a ? a.imagem : '', imgFresh = '', stars = a ? a.estrelas : 5, touched = !!a;
+      const known = a && a.idAnuncio && prods.some(p => p.id === a.idAnuncio);
+      const m = dlg({ title: isNew ? 'Nova avaliação' : 'Editar avaliação', cls: 'sm', body: `<div class="pf-cols">
+        <label class="fld full">Item comprado *<select class="in" id="r_it"><option value="">Selecione…</option>${prods.map(p => `<option value="${esc(p.id)}" ${a && a.idAnuncio === p.id ? 'selected' : ''}>${esc(p.nome)}</option>`).join('')}<option value="_o" ${a && !known ? 'selected' : ''}>Outro item (digitar)</option></select></label>
+        <label class="fld full" id="r_ot_r" ${a && !known ? '' : 'hidden'}>Nome do item<input class="in" id="r_ot" maxlength="140" value="${esc(a && !known ? a.produto : '')}"></label>
+        <label class="fld full">Cliente *<input class="in" id="r_cl" maxlength="60" value="${esc(a ? a.cliente : '')}" placeholder="Ex.: Ana Paula Souza"><span class="help">No site aparece só o primeiro nome e a inicial (ex.: “Ana S.”).</span></label>
+        <div class="fld full">Nota *<div class="rate" id="r_st" role="radiogroup" aria-label="Nota de 1 a 5">${[1, 2, 3, 4, 5].map(n => `<button type="button" class="rb" data-n="${n}" role="radio" aria-label="${n} estrela${n > 1 ? 's' : ''}">★</button>`).join('')}</div></div>
+        <label class="fld full">Comentário curto (aparece no site)<input class="in" id="r_co" maxlength="220" value="${esc(a ? a.comentario : '')}" placeholder="Ex.: Ótimo produto, atendimento excelente!"></label>
+        <label class="fld full">Observações internas<textarea class="in" id="r_ob" maxlength="1000" placeholder="Não aparecem no site">${esc(a ? a.observacoes : '')}</textarea></label>
+        <label class="fld">Data da compra<input class="in" type="date" id="r_dt" value="${esc(a ? a.dataCompra : '')}"></label>
+        <label class="fld">Situação<select class="in" id="r_su"><option ${!a || a.status === 'Publicado' ? 'selected' : ''}>Publicado</option><option ${a && a.status === 'Oculto' ? 'selected' : ''}>Oculto</option></select></label>
+        <div class="fld full">Print da conversa (opcional)<div id="r_img"></div><input type="file" id="r_file" accept="image/jpeg,image/png,image/webp" hidden>
+          <div><button class="btn btn-sm" type="button" id="r_add" style="margin-top:6px">+ Enviar print</button> <span class="help" id="r_up"></span></div>
+          <span class="help">Antes de enviar, cubra telefones e dados pessoais que apareçam na conversa.</span></div>
+        <label class="chk full"><input type="checkbox" id="r_au" ${a && a.autorizado ? 'checked' : ''}> O cliente autorizou divulgar o nome e a conversa *</label>
+        <div class="fld full">Onde mostrar<div class="chkg"><label class="chk"><input type="checkbox" id="r_de" ${a && a.destaque ? 'checked' : ''}> Destaque (carrossel, só 5★)</label><label class="chk"><input type="checkbox" id="r_np" ${a && a.noProduto ? 'checked' : ''}> No item</label><label class="chk"><input type="checkbox" id="r_po" ${a && a.noPortfolio ? 'checked' : ''}> Portfólio</label></div>
+          <span class="help" id="r_h"></span></div>
+        <div class="fld full formerr" id="r_err" role="alert" style="text-align:left"></div></div>`,
+        footer: `<button class="btn" data-x2>Cancelar</button><button class="btn btn-pri" id="r_save">Salvar</button>` });
+      const E = id => $('#' + id, m.el); $('[data-x2]', m.el).onclick = () => { if (imgFresh) api('deleteMedia', { fileId: driveFileId(imgFresh) }).catch(() => {}); m.close(); };
+      const drawImg = () => { E('r_img').innerHTML = img ? `<div class="ph" style="max-width:120px"><img src="${esc(SZ.thumb(img, 240))}" alt="Print"><div class="tools"><button type="button" data-rmimg aria-label="Remover print">✕</button></div></div>` : ''; };
+      const drawStars = () => { $$('.rb', m.el).forEach(b => { b.classList.toggle('on', +b.dataset.n <= stars); b.setAttribute('aria-checked', +b.dataset.n === stars); }); const five = stars === 5; E('r_de').disabled = !five; if (!five) E('r_de').checked = false;
+        E('r_h').textContent = five ? 'Avaliações de 5 estrelas aparecem no destaque, no item e no portfólio por padrão.' : 'Abaixo de 5 estrelas: não vai para o destaque. Marque “No item” ou “Portfólio” só se quiser mostrar.'; };
+      E('r_st').onclick = ev => { const b = ev.target.closest('.rb'); if (!b) return; stars = +b.dataset.n; if (!touched) { const five = stars === 5; E('r_de').checked = five; E('r_np').checked = five; E('r_po').checked = five; } drawStars(); };
+      $$('#r_de,#r_np,#r_po', m.el).forEach(c => c.onchange = () => { touched = true; });
+      if (isNew) { E('r_de').checked = E('r_np').checked = E('r_po').checked = true; } drawStars(); drawImg();
+      E('r_it').onchange = () => { E('r_ot_r').hidden = E('r_it').value !== '_o'; };
+      E('r_add').onclick = () => E('r_file').click();
+      E('r_img').onclick = ev => { if (ev.target.closest('[data-rmimg]')) { if (imgFresh && img === imgFresh) { api('deleteMedia', { fileId: driveFileId(imgFresh) }).catch(() => {}); imgFresh = ''; } img = ''; drawImg(); } };
+      E('r_file').onchange = async ev => {
+        const f = ev.target.files[0]; ev.target.value = ''; if (!f) return; const up = E('r_up'); up.innerHTML = '<span class="spin"></span> Enviando…';
+        try { if (!/^image\/(jpeg|png|webp)$/.test(f.type)) throw new Error('Use JPG, PNG ou WEBP.'); const b64 = await resizeImage(f, 1600), r = await api('uploadMedia', { mimeType: 'image/jpeg', base64: b64 });
+          if (imgFresh) api('deleteMedia', { fileId: driveFileId(imgFresh) }).catch(() => {}); img = imgFresh = r.url; drawImg(); } catch (e) { fail(e); }
+        up.textContent = '';
+      };
+      E('r_save').onclick = async () => {
+        const it = E('r_it').value, er = [];
+        if (!it) er.push('Escolha o item comprado.'); if (it === '_o' && E('r_ot').value.trim().length < 2) er.push('Digite o nome do item.');
+        if (E('r_cl').value.trim().length < 2) er.push('Informe o nome do cliente.');
+        if (E('r_su').value === 'Publicado' && !E('r_au').checked) er.push('Para publicar, confirme a autorização do cliente. Sem ela, deixe como Oculto.');
+        E('r_err').innerHTML = er.map(x => '• ' + esc(x)).join('<br>'); if (er.length) return;
+        const b = E('r_save'); b.disabled = true; b.textContent = 'Salvando…';
+        const body = { id: a ? a.id : undefined, idAnuncio: it === '_o' ? '' : it, produto: it === '_o' ? E('r_ot').value.trim() : '', cliente: E('r_cl').value.trim(), estrelas: stars, comentario: E('r_co').value, observacoes: E('r_ob').value, dataCompra: E('r_dt').value, imagem: img,
+          autorizado: E('r_au').checked, status: E('r_su').value, destaque: E('r_de').checked, noProduto: E('r_np').checked, noPortfolio: E('r_po').checked };
+        try { await api('saveReview', body); if (a && a.imagem && a.imagem !== img) { const fid = driveFileId(a.imagem); if (fid) api('deleteMedia', { fileId: fid }).catch(() => {}); } imgFresh = ''; SZ.toast(isNew ? 'Avaliação cadastrada.' : 'Avaliação atualizada.'); m.close(); load(); }
+        catch (e) { E('r_err').textContent = e.message || 'Erro ao salvar.'; b.disabled = false; b.textContent = 'Salvar'; }
+      };
+    }
+
+    /* ---- vídeos ---- */
+    function drawVideos() {
+      $('#fbody').innerHTML = `<div class="note info">Os vídeos passam em loop, sem som, na guia Feedbacks do site. <b>Envie arquivos curtos (MP4, até 25 MB)</b> ou <b>cole um link</b> do YouTube (use “não listado”), do Google Drive ou de um arquivo .mp4. Para vídeos longos ou pesados, prefira o link.</div>
+        <section class="panel"><h2>Adicionar vídeo</h2><div class="pf-cols"><label class="fld">Título (opcional)<input class="in" id="v_t" maxlength="80" placeholder="Ex.: Montagem completa"></label>
+          <label class="fld">Link do vídeo<input class="in" id="v_u" maxlength="400" placeholder="https://youtu.be/…"></label>
+          <div class="full"><button class="btn btn-pri" id="v_link" type="button">Adicionar pelo link</button> <span class="help">ou</span> <button class="btn" id="v_up" type="button">Enviar arquivo de vídeo</button> <input type="file" id="v_file" accept="video/mp4,video/webm,video/quicktime" hidden> <span class="help" id="v_st"></span></div>
+          <div class="full formerr" id="v_err" role="alert" style="text-align:left"></div></div></section>
+        <section class="panel"><h2>Vídeos (${D.videos.length})</h2>${D.videos.length ? `<div class="tw"><table class="tbl rs"><thead><tr><th>Ordem</th><th>Título</th><th>Origem</th><th>Situação</th><th></th></tr></thead><tbody>${D.videos.map(v => `<tr data-id="${esc(v.id)}"><td data-l="Ordem"><input class="in" data-o type="number" min="1" value="${v.ordem}" style="max-width:80px" aria-label="Ordem"></td><td data-l="Título">${esc(v.titulo || '(sem título)')}</td><td data-l="Origem">${v.tipo === 'upload' ? 'Arquivo enviado' : `<a href="${esc(v.url)}" target="_blank" rel="noopener" style="color:var(--neon2)">Link</a>`}</td>
+          <td data-l="Situação"><span class="pill ${v.status === 'Publicado' ? 'ok' : 'mute'}">${esc(v.status)}</span></td><td><div class="acts"><button class="btn btn-sm" data-tg>${v.status === 'Publicado' ? 'Ocultar' : 'Publicar'}</button><button class="btn btn-sm" data-rm>Excluir</button></div></td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">Nenhum vídeo ainda.</div>'}</section>`;
+      const err = m => { $('#v_err').textContent = m || ''; };
+      $('#v_link').onclick = async () => { err(); try { await api('saveVideo', { tipo: 'link', titulo: $('#v_t').value, url: $('#v_u').value.trim() }); SZ.toast('Vídeo adicionado.'); load(); } catch (e) { err(e.message); } };
+      $('#v_up').onclick = () => $('#v_file').click();
+      $('#v_file').onchange = async ev => {
+        const f = ev.target.files[0]; ev.target.value = ''; if (!f) return; err();
+        if (!/^video\/(mp4|webm|quicktime)$/.test(f.type)) { err('Use MP4, WEBM ou MOV.'); return; }
+        if (f.size > 25 * 1024 * 1024) { err('O vídeo tem mais de 25 MB. Comprima ou use um link do YouTube/Drive.'); return; }
+        $('#v_st').innerHTML = '<span class="spin"></span> Enviando vídeo… isso pode levar alguns instantes.';
+        try { const r = await api('uploadMedia', { mimeType: f.type, base64: await fileB64(f) }); await api('saveVideo', { tipo: 'upload', titulo: $('#v_t').value, arquivoId: r.fileId }); SZ.toast('Vídeo enviado.'); load(); }
+        catch (e) { err((e.message || 'Falha no envio.') + ' Se o arquivo for pesado, use um link.'); }
+        $('#v_st').textContent = '';
+      };
+      $('#fbody').onclick = async ev => {
+        const tr = ev.target.closest('tr[data-id]'); if (!tr) return; const v = D.videos.find(x => x.id === tr.dataset.id);
+        const save = patch => api('saveVideo', { id: v.id, tipo: v.tipo, titulo: v.titulo, url: v.url, arquivoId: v.arquivoId, ordem: v.ordem, status: v.status, ...patch });
+        if (ev.target.closest('[data-tg]')) { try { await save({ status: v.status === 'Publicado' ? 'Oculto' : 'Publicado' }); load(); } catch (e) { fail(e); } }
+        if (ev.target.closest('[data-rm]')) { if (!confirm('Excluir este vídeo?')) return; try { await api('deleteVideo', { id: v.id }); SZ.toast('Vídeo excluído.'); load(); } catch (e) { fail(e); } }
+      };
+      $('#fbody').onchange = async ev => { const o = ev.target.closest('[data-o]'); if (!o) return; const v = D.videos.find(x => x.id === o.closest('tr').dataset.id); try { await api('saveVideo', { id: v.id, tipo: v.tipo, titulo: v.titulo, url: v.url, arquivoId: v.arquivoId, status: v.status, ordem: o.value }); load(); } catch (e) { fail(e); } };
+    }
+    load();
   }
 
   /* ------------------------------ contatos (números de atendimento) ------------------------------ */
