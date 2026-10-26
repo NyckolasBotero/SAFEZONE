@@ -109,7 +109,7 @@ function doPost(e) {
       console.error(err && err.stack || err);
       if (user && route && route.write) audit_(user.login, action, '', 'ERRO');
     }
-    out = errOut_(err);
+    out = errOut_(err, user, action);
   }
   return json_(out);
 }
@@ -118,9 +118,11 @@ class ApiError extends Error {
   constructor(code, message) { super(message); this.code = code; }
 }
 
-function errOut_(err) {
+function errOut_(err, user, action) {
   if (err instanceof ApiError) return { ok: false, error: { code: err.code, message: err.message } };
-  return { ok: false, error: { code: 'INTERNAL', message: 'Erro interno. Tente novamente em instantes.' } };
+  // Só quem está logado no painel vê o motivo técnico (para achar o problema); o público vê a mensagem genérica.
+  const det = user ? ' [' + String(action || '') + ': ' + String((err && err.message) || err).replace(/\s+/g, ' ').slice(0, 220) + ']' : '';
+  return { ok: false, error: { code: 'INTERNAL', message: 'Erro interno. Tente novamente em instantes.' + det } };
 }
 
 function json_(obj) {
@@ -695,7 +697,13 @@ function rules_() {
 }
 
 function ctx_() {
-  if (!CTX_) CTX_ = { rules: rules_(), offers: table_('Ofertas').rows.filter(offerLive_).map(offerRow_) };
+  if (!CTX_) {
+    // Se a guia Ofertas ou as regras falharem, o site continua com os preços normais.
+    let rules = { margem: 20, descMax: 10, margemMin: 0 }, offers = [];
+    try { rules = rules_(); } catch (e) { console.error('regras', e); }
+    try { offers = table_('Ofertas').rows.filter(offerLive_).map(offerRow_); } catch (e) { console.error('ofertas', e); }
+    CTX_ = { rules: rules, offers: offers };
+  }
   return CTX_;
 }
 

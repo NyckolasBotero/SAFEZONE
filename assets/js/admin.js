@@ -245,8 +245,12 @@
           else { const c = cloud.find(x => 'c:' + x.id === sel); if (!c || !c.configuracao || !c.configuracao.els) throw new Error('layout não encontrado'); cfg = c.configuracao; }
           const prod = { nome: p.nome, categoria: p.categoria, marca: p.marca, modelo: p.modelo, descricaoCurta: p.descricaoCurta, precoNormal: p.precoNormal, precoPromocional: p.precoPromocionalEfetivo != null ? p.precoPromocionalEfetivo : p.precoPromocional,
             condicao: p.condicao, conservacao: p.conservacao, especificacoes: p.especificacoes, seloModo: p.seloModo, seloManual: p.seloManual || '' };
-          const u = await Art.render(cfg, prod, src), up = await api('uploadImage', { mimeType: 'image/jpeg', base64: u.split(',')[1] });
-          const r = await api('saveProductArt', { id: p.id, layoutArte: sel, fotoArte: up.url });
+          let step = 'gerando a arte';
+          try {
+            const u = await Art.render(cfg, prod, src); step = 'enviando a imagem ao Drive';
+            var up = await api('uploadImage', { mimeType: 'image/jpeg', base64: u.split(',')[1] }); step = 'salvando o anúncio';
+            var r = await api('saveProductArt', { id: p.id, layoutArte: sel, fotoArte: up.url });
+          } catch (e) { e.message = `${step}: ${e.message}`; throw e; }
           const old = driveId(r && r.antiga); if (old) api('deleteImage', { fileId: old }).catch(() => {}); ok++;
         } catch (e) { bad.push(`${p.nome}: ${e.message || 'falhou'}`); }
       }

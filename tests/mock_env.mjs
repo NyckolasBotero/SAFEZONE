@@ -6,14 +6,16 @@ const CODE = fileURLToPath(new URL('../apps-script/Code.gs', import.meta.url));
 let __n = 0;
 export function makeEnv(seed) {
   const sheets = {};
+  // Como o Google Sheets de verdade: textos que parecem data viram Date ao gravar.
+  const coerce = x => (typeof x === 'string' && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(:\d{2})?$/.test(x)) ? new Date(x.replace(' ', 'T') + (x.length === 16 ? ':00' : '') + '-03:00') : x;
   const mk = (name, rows) => { const s = { name, rows: rows.map(r => r.slice()),
     getDataRange: () => ({ getValues: () => s.rows.map(r => r.slice()) }),
     getLastRow: () => s.rows.length, getLastColumn: () => Math.max(0, ...s.rows.map(r => r.length)),
     getRange: (r, c, nr = 1, nc = 1) => ({
       getValues: () => { const o = []; for (let i = 0; i < nr; i++) { const row = []; for (let j = 0; j < nc; j++) row.push((s.rows[r - 1 + i] || [])[c - 1 + j] ?? ''); o.push(row); } return o; },
-      setValues: (v) => { v.forEach((row, i) => { s.rows[r - 1 + i] = s.rows[r - 1 + i] || []; row.forEach((x, j) => { s.rows[r - 1 + i][c - 1 + j] = x; }); }); },
+      setValues: (v) => { v.forEach((row, i) => { s.rows[r - 1 + i] = s.rows[r - 1 + i] || []; row.forEach((x, j) => { s.rows[r - 1 + i][c - 1 + j] = coerce(x); }); }); },
       setFontWeight() {} }),
-    appendRow: (row) => { s.rows.push(row.slice()); }, deleteRow: (n) => { s.rows.splice(n - 1, 1); }, deleteRows: (n, k) => { s.rows.splice(n - 1, k); }, getMaxRows: () => 1e6, insertRowsAfter() {},
+    appendRow: (row) => { s.rows.push(row.map(coerce)); }, deleteRow: (n) => { s.rows.splice(n - 1, 1); }, deleteRows: (n, k) => { s.rows.splice(n - 1, k); }, getMaxRows: () => 1e6, insertRowsAfter() {},
     setFrozenRows() {}, setName: (n) => { s.name = n; sheets[n] = s; } }; sheets[name] = s; return s; };
   mk('Permissionamento', seed);
   const store = {}; const cacheMk = () => ({ get: k => store[k] ?? null, put: (k, v) => { store[k] = v; }, remove: k => { delete store[k]; } });
