@@ -511,13 +511,22 @@
         try {
           const r = await api('previewOffer', body()), lim = r.itens.filter(x => x.ok && x.limite).length, sc = r.itens.filter(x => !x.ok).length;
           E('o_pv').innerHTML = `<div class="note info"><b>${r.aplicados} de ${r.total}</b> produto(s) recebem a oferta${lim ? ` · ${lim} com desconto limitado pelas suas regras` : ''}${sc ? ` · ${sc} ficam de fora` : ''}.</div>
-            <div class="tw" style="max-height:300px;overflow:auto"><table class="tbl"><thead><tr><th>Produto</th><th class="num">Preço</th><th class="num">Custo</th><th class="num">Fica por</th><th class="num">Desc.</th><th class="num">Margem</th></tr></thead><tbody>${r.itens.map(x => `<tr><td>${esc(x.nome)}</td><td class="num">${SZ.brl(x.normal)}</td><td class="num">${x.custo != null ? SZ.brl(x.custo) : '—'}</td>
+            <div class="tw" style="max-height:300px;overflow:auto"><table class="tbl"><thead><tr><th>Produto</th><th class="num">Preço</th><th class="num">Custo</th><th class="num">Fica por</th><th class="num">Desc.</th><th class="num">Margem</th></tr></thead><tbody>${r.itens.map(x => `<tr><td>${esc(x.nome)}${x.manual != null ? `<br><small style="color:var(--mute)">promoção manual atual: ${SZ.brl(x.manual)}</small>` : ''}</td><td class="num">${SZ.brl(x.normal)}</td><td class="num">${x.custo != null ? SZ.brl(x.custo) : '—'}</td>
             ${x.ok ? `<td class="num"><b>${SZ.brl(x.novoPreco)}</b></td><td class="num">${pct(x.pct)}${x.limite ? `<br><small style="color:var(--mute)">limite: ${esc(x.limite)}</small>` : ''}</td><td class="num">${pct(x.margemApos)}</td>` : `<td colspan="3" style="color:var(--mute)">fora: ${esc(MOTIVO[x.motivo] || x.motivo)}</td>`}</tr>`).join('') || '<tr><td colspan="6">Nenhum produto neste alvo.</td></tr>'}</tbody></table></div>`;
         } catch (e) { E('o_pv').innerHTML = ''; E('o_err').textContent = e.message; }
       };
+      let subst = o ? o.substituir !== false : true;
+      const askSubst = n => new Promise(res => {
+        const q = dlg({ title: 'Produtos com promoção manual', body: `<p><b>${n} produto(s)</b> desta oferta já têm uma promoção manual. Quando a oferta programada entrar em vigor, o que fazer?</p><p class="help">Ao terminar a vigência, a promoção manual continua como está.</p>`,
+          footer: '<button class="btn" id="q_keep">Manter a promoção manual</button><button class="btn btn-pri" id="q_sub">Substituir pela oferta programada</button>' });
+        $('#q_sub', q.el).onclick = () => { q.close(); res(true); }; $('#q_keep', q.el).onclick = () => { q.close(); res(false); };
+      });
       E('o_save').onclick = async () => {
         const b = E('o_save'); b.disabled = true; E('o_err').textContent = '';
-        try { await api('saveOffer', body()); SZ.sessionBust(); SZ.toast('Oferta salva. Ela entra no ar na data de início.'); m.close(); load(); } catch (e) { E('o_err').textContent = e.message; b.disabled = false; }
+        try {
+          const pv = await api('previewOffer', body());
+          if (pv.comManual > 0) subst = await askSubst(pv.comManual);
+          await api('saveOffer', { ...body(), substituir: subst }); SZ.sessionBust(); SZ.toast('Oferta salva. Ela entra no ar na data de início.'); m.close(); load(); } catch (e) { E('o_err').textContent = e.message; b.disabled = false; }
       };
     }
     load();

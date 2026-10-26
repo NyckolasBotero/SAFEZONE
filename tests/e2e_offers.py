@@ -51,11 +51,11 @@ with sync_playwright() as p:
     pg.click('#o_x'); pg.click('#onew'); pg.wait_for_selector('#o_nome')
     pg.fill('#o_nome','Semana dos teclados'); pg.select_option('#o_esc','categoria'); pg.select_option('#o_cat','Periféricos'); pg.select_option('#o_sub','Teclados'); pg.fill('#o_pct','30')
     pg.click('#o_prev'); pg.wait_for_selector('#o_pv table'); pv=pg.inner_text('#o_pv')
-    ok('limite: desconto máximo' in pv and '1.080,00' in pv,'prévia mostra desconto limitado a 10%: 1.200 -> 1.080')
+    ok('limite: desconto máximo' in pv and '1.089,90' in pv,'prévia mostra desconto limitado a 10%: 1.200 -> 1.089,90')
     ok('sem custo cadastrado' in pv,'produto sem custo fica de fora')
     pg.screenshot(path=str(OUT/'oferta_form.png'))
     pg.click('#o_save'); pg.wait_for_selector('#obody tr[data-id]'); ok('No ar' in pg.inner_text('#obody'),'oferta salva e já no ar')
-    pub=call('listProducts')['data']; k=[x for x in pub if x['nome']=='Teclado Alfa'][0]; ok(k['precoAtual']==1080 and k['desconto']==10,'site público já mostra R$ 1.080 (-10%)')
+    pub=call('listProducts')['data']; k=[x for x in pub if x['nome']=='Teclado Alfa'][0]; ok(k['precoAtual']==1089.9 and k['desconto']==9,'site público já mostra R$ 1.089,90 (-9%)')
     ok([x for x in pub if x['nome']=='Teclado Sem Custo'][0]['precoAtual']==150,'sem custo: preço intacto')
     ok('custo' not in json.dumps(pub),'custo não vaza no catálogo')
     # atualizar artes da oferta

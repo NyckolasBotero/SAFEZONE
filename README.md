@@ -43,3 +43,7 @@ Site estático (HTML/CSS/JS puro, sem build) + backend em Google Apps Script + G
 - **Indicadores**: giro (vendas 30/90 dias x estoque) e folga de margem para ofertas.
 - **Editor**: formas, sublinhado, sombra, contorno, degradê com ângulo/fade, fontes, espelhar/centralizar e “Criar com IA” (gerador por regras, offline).
 - Depois de colar o novo `Code.gs`, rode `setup()` uma vez e publique uma nova versão da implantação.
+
+### Regras de preço da oferta programada
+- O preço da oferta é **arredondado para cima fechando em 9,90** (ex.: 313,40 → 319,90; 1.330,00 → 1.339,90). Nunca fica abaixo do custo + margem mínima; se o arredondamento chegasse ao preço normal, usa o valor exato.
+- Ao salvar uma oferta que atinge produtos com **promoção manual**, o Adm pergunta se a oferta **substitui** a manual durante a vigência ou se **mantém** a manual. A promoção manual nunca é apagada: ao fim da vigência ela volta sozinha. Ofertas antigas (sem a escolha) substituem por padrão. Rode `setup()` para criar a coluna `SubstituirManual`.

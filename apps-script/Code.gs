@@ -54,7 +54,7 @@ const SHEETS = {
   Layouts: ['IDLayout', 'Nome', 'Formato', 'Configuracao', 'DataCriacao', 'DataAtualizacao', 'CriadoPor'],
   Avaliacoes: ['IDAvaliacao', 'IDAnuncio', 'Produto', 'Cliente', 'Estrelas', 'Comentario', 'Observacoes', 'Imagem', 'Autorizado', 'Status', 'Destaque', 'NoProduto', 'NoPortfolio', 'DataCompra', 'DataCriacao', 'DataAtualizacao', 'CriadoPor'],
   Videos: ['IDVideo', 'Titulo', 'Tipo', 'Url', 'ArquivoID', 'Ordem', 'Status', 'DataCriacao'],
-  Ofertas: ['IDOferta', 'Nome', 'Escopo', 'Categoria', 'Subcategoria', 'IDsAnuncios', 'Percentual', 'Inicio', 'Fim', 'Status', 'DataCriacao', 'DataAtualizacao', 'CriadoPor'],
+  Ofertas: ['IDOferta', 'Nome', 'Escopo', 'Categoria', 'Subcategoria', 'IDsAnuncios', 'Percentual', 'Inicio', 'Fim', 'Status', 'DataCriacao', 'DataAtualizacao', 'CriadoPor', 'SubstituirManual'],
   Servicos: ['IDServico', 'Nome', 'Descricao', 'Modo', 'PrecoUnico', 'PrecoLow', 'PrecoMid', 'PrecoHigh', 'ParteDoPercentual', 'Ordem', 'Ativo'],
   Componentes: ['IDComponente', 'Tipo', 'Marca', 'Nome', 'Classe', 'PrecoEstimado', 'Ativo'],
   Configuracoes: ['Chave', 'Valor'],
@@ -717,7 +717,7 @@ function offerRow_(r) {
   let ids = [];
   try { ids = JSON.parse(r.IDsAnuncios || '[]'); } catch (e) { ids = []; }
   return { id: r.IDOferta, nome: r.Nome, escopo: r.Escopo, categoria: r.Categoria, subcategoria: r.Subcategoria || '',
-    ids: ids, pct: Number(r.Percentual) || 0, inicio: String(cell_(r.Inicio)).slice(0, 16), fim: String(cell_(r.Fim)).slice(0, 16), status: r.Status };
+    ids: ids, pct: Number(r.Percentual) || 0, substituir: r.SubstituirManual !== 'Não', inicio: String(cell_(r.Inicio)).slice(0, 16), fim: String(cell_(r.Fim)).slice(0, 16), status: r.Status };
 }
 
 function offerCovers_(o, r) {
@@ -737,6 +737,9 @@ function calcOffer_(r, pct, rules) {
   let price = Math.round(normal * (1 - d / 100) * 100) / 100, limite = pct > rules.descMax ? 'desconto máximo' : '';
   const piso = Math.round(custo * (1 + rules.margemMin / 100) * 100) / 100;
   if (price < piso) { price = piso; limite = 'custo'; }
+  // arredonda para cima fechando em 9,90 (ex.: 313,40 -> 319,90; 1.330,00 -> 1.339,90); nunca fica abaixo do piso
+  const cents = Math.round(price * 100), rounded = Math.ceil((cents - 990) / 1000) * 1000 + 990;
+  if (rounded < Math.round(normal * 100)) price = rounded / 100;
   if (!(price < normal)) return { ok: false, motivo: 'sem_espaco' };
   return { ok: true, preco: price, pct: Math.round((1 - price / normal) * 1000) / 10, limite: limite,
     margemApos: Math.round((price / custo - 1) * 1000) / 10 };
@@ -744,16 +747,18 @@ function calcOffer_(r, pct, rules) {
 
 /** Promoção que vale hoje = a mais barata entre a manual e as ofertas agendadas. */
 function effectivePromo_(r) {
-  const normal = Number(r.PrecoNormal) || 0;
   const manual = (r.PrecoPromocional === '' || r.PrecoPromocional == null) ? null : Number(r.PrecoPromocional);
+  const temManual = manual != null && manual > 0;
   let best = null, oferta = null;
   const c = ctx_();
   c.offers.forEach(function (o) {
     if (!offerCovers_(o, r)) return;
+    if (temManual && !o.substituir) return;            // dono escolheu manter a promoção manual
     const x = calcOffer_(r, o.pct, c.rules);
     if (x.ok && (best == null || x.preco < best)) { best = x.preco; oferta = { id: o.id, nome: o.nome, pct: x.pct, limite: x.limite, fim: o.fim }; }
   });
-  if (best != null && (manual == null || !(manual > 0 && manual < best))) return { promo: best, oferta: oferta };
+  // oferta programada vigente vale sobre a manual (se escolhido); ao encerrar, a manual volta sozinha
+  if (best != null) return { promo: best, oferta: oferta };
   return { promo: manual, oferta: null };
 }
 
@@ -803,21 +808,24 @@ function validateOffer_(d) {
   if (!re.test(ini) || !re.test(fim)) throw new ApiError('VALIDATION', 'Informe início e fim da oferta.');
   if (fim <= ini) throw new ApiError('VALIDATION', 'O fim da oferta deve ser depois do início.');
   const status = d.status === 'Pausada' ? 'Pausada' : 'Ativa';
-  return { Nome: nome, Escopo: escopo, Categoria: categoria, Subcategoria: sub, IDsAnuncios: JSON.stringify(ids),
+  const subst = (d.substituir === false || d.substituir === 'false' || d.substituir === 'Não') ? 'Não' : 'Sim';
+  return { SubstituirManual: subst, Nome: nome, Escopo: escopo, Categoria: categoria, Subcategoria: sub, IDsAnuncios: JSON.stringify(ids),
     Percentual: Math.round(pct * 100) / 100, Inicio: ini, Fim: fim, Status: status };
 }
 
 function previewOffer_(d) {
   const v = validateOffer_(d), rules = rules_();
   const o = offerRow_({ IDOferta: '', Nome: v.Nome, Escopo: v.Escopo, Categoria: v.Categoria, Subcategoria: v.Subcategoria, IDsAnuncios: v.IDsAnuncios,
-    Percentual: v.Percentual, Inicio: v.Inicio, Fim: v.Fim, Status: 'Ativa' });
+    Percentual: v.Percentual, Inicio: v.Inicio, Fim: v.Fim, Status: 'Ativa', SubstituirManual: v.SubstituirManual });
   const rows = table_('Anuncios').rows.filter(function (r) { return offerCovers_(o, r); }).map(function (r) {
     const x = calcOffer_(r, o.pct, rules), custo = money_(r.Custo);
     return { id: r.ID, nome: r.Nome, categoria: r.Categoria, subcategoria: r.Subcategoria || '', status: r.Status, normal: Number(r.PrecoNormal) || 0,
+      manual: (Number(r.PrecoPromocional) > 0 && Number(r.PrecoPromocional) < Number(r.PrecoNormal)) ? Number(r.PrecoPromocional) : null,
       custo: custo > 0 ? custo : null, ok: x.ok, motivo: x.ok ? '' : x.motivo, novoPreco: x.ok ? x.preco : null, pct: x.ok ? x.pct : null,
       limite: x.ok ? x.limite : '', margemApos: x.ok ? x.margemApos : null };
   });
-  return { regras: rules, pedido: o.pct, total: rows.length, aplicados: rows.filter(function (x) { return x.ok; }).length, itens: rows };
+  return { regras: rules, pedido: o.pct, total: rows.length, aplicados: rows.filter(function (x) { return x.ok; }).length,
+    comManual: rows.filter(function (x) { return x.ok && x.manual != null; }).length, itens: rows };
 }
 
 function offerState_(o) {
@@ -833,7 +841,7 @@ function listOffers_() {
   return table_('Ofertas').rows.filter(function (r) { return r.Status !== 'Excluída'; }).map(function (r) {
     const o = offerRow_(r);
     const cov = prods.filter(function (p) { return offerCovers_(o, p); });
-    return { id: o.id, nome: o.nome, escopo: o.escopo, categoria: o.categoria, subcategoria: o.subcategoria, ids: o.ids, percentual: o.pct,
+    return { id: o.id, nome: o.nome, escopo: o.escopo, categoria: o.categoria, subcategoria: o.subcategoria, ids: o.ids, percentual: o.pct, substituir: o.substituir,
       inicio: o.inicio, fim: o.fim, status: o.status, estado: offerState_(o), produtos: cov.length,
       aplicados: cov.filter(function (p) { return calcOffer_(p, o.pct, rules).ok; }).length, idsAfetados: cov.map(function (p) { return p.ID; }) };
   }).sort(function (a, b) { return a.inicio < b.inicio ? 1 : -1; });
